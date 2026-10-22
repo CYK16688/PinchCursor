@@ -47,21 +47,9 @@ Most gesture demos die at the same three places: the cursor jitters, a fist clos
 
 ## How it works
 
-```
-camera ──▶ worker thread ──▶ MediaPipe Hand Landmarker (21 points)
-                                    │
-                              main thread
-                                    ▼
-   tracker ─▶ classifier ─▶ intent arbiter ─▶ control session ─▶ pointer state machine
-                                    │                              │
-                                    │                       target probe (AX)
-                                    │                              ▼
-                                    │                     Bayesian snap / ranker
-                                    ▼                              │
-                     combos · dynamic DTW · context        native input (CGEvent)
-                                    │                              │
-                                    └──────────▶ HUD + telemetry ◀─┘
-```
+![PinchCursor runtime architecture](docs/architecture.svg)
+
+Two threads, one lane that owns the pointer. Camera capture and MediaPipe inference run on a worker thread, so a slow frame can never stall the cursor; classification, arbitration and the pointer state machine run deterministically on the main thread; `platform_services/` is the only place `ctypes` touches macOS, which is why the fake-backed tests can drive the whole pipeline without a camera or an accessibility grant.
 
 The core (`core/`) is pure Python with no Qt imports, so every decision layer is unit‑testable; the shell (`gui/`) is PySide6; `platform_services/` hides macOS Accessibility and CGEvent behind contracts with a fake‑backed implementation for tests.
 
