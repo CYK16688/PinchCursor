@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Runtime data (never commit a user's settings or event log)
+settings.json
+telemetry.sqlite3
+telemetry.sqlite3-journal
+*.log
+
+# Build output
+build/
+dist/
+*.app/
+
+# macOS
+.DS_Store

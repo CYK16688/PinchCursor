@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gesture-controller"
+version = "0.2.0"
+description = "macOS-first desktop hand gesture controller"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "PySide6==6.12.0",
+  "mediapipe==1.1.1",
+  "numpy==2.5.4",
+  # mediapipe 1.1.1 depends on opencv-contrib-python; opencv-python also
+  # provides `cv2` and installing both corrupts the import path.
+  "opencv-contrib-python==5.0.0.93",
+]
+
+[project.optional-dependencies]
+macos = [
+  "pyobjc-framework-ApplicationServices==12.2.2",
+  "pyobjc-framework-AVFoundation==12.2.2",
+  "pyobjc-framework-Quartz==12.2.2",
+]
+test = [
+  "pytest==9.1.1",
+  "pytest-qt==4.5.0",
+]
+macos-build = ["pyinstaller==6.22.3"]
+
+[project.scripts]
+gesture-control = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["core*", "gui*", "utils*", "platform_services*"]
+exclude = ["tests*", "data*", "models*", "assets*"]
+
+[tool.setuptools.package-data]
+core = ["models/*.task"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
