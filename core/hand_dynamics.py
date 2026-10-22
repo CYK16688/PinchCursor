@@ -52,6 +52,12 @@ class DynamicAssessment:
     transition: bool
     others_rate: float
     wrist_speed: float
+    # Mean distance of the three other fingertips to the wrist, in palm units:
+    # an open hand sits well above 2, a closing one falls through it.
+    others_distance: float = 0.0
+    # How fast the pinch itself is closing. A real pinch settles; a pass-through
+    # keeps closing while the rest of the hand does too.
+    pinch_slope: float = 0.0
 
 
 def _valid_landmarks(landmarks) -> bool:
@@ -130,6 +136,7 @@ class HandDynamics:
 
         others_rate = 0.0
         wrist_speed = 0.0
+        pinch_slope = 0.0
         if len(self._history) >= 2:
             first = self._history[0]
             last = self._history[-1]
@@ -137,6 +144,7 @@ class HandDynamics:
             if span >= MIN_HISTORY_SECONDS:
                 others_rate = (last[2] - first[2]) / span
                 wrist_speed = math.hypot(last[3] - first[3], last[4] - first[4]) / span
+                pinch_slope = (last[1] - first[1]) / span
 
         transition = bool(
             pinch <= self.enter_ratio * 1.35
@@ -163,6 +171,8 @@ class HandDynamics:
             transition=transition,
             others_rate=others_rate,
             wrist_speed=wrist_speed,
+            others_distance=others,
+            pinch_slope=pinch_slope,
         )
 
     def _likelihood(self, pinch_ratio: float) -> float:

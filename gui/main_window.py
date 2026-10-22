@@ -22,6 +22,8 @@ from core.action_coordinator import GestureActionCoordinator
 from core.action_state_machine import ActionState, ActionStateMachine
 from core.assist.features import build_features
 from core.adaptive_tuning import tune_snapping
+from core.transition_episodes import PinchEpisodeTracker
+from core.transition_model import TransitionModel
 from core.assist.ranker import LinearRanker
 from core.assist.target_model import Target, TargetModel
 from core.hand_dynamics import HandDynamics
@@ -211,6 +213,8 @@ class MainWindow(QMainWindow):
         self.ranker = None
         self.assist_mode = "bayesian"
         self.telemetry = None
+        # Turn each pinch into one labelled episode, when telemetry is on.
+        self.pinch_episodes = PinchEpisodeTracker()
         # Every display is addressable, not just the primary one: the union is
         # what both mapping strategies clamp against.
         self.screen_bounds = self._compute_screen_bounds()
@@ -361,6 +365,7 @@ class MainWindow(QMainWindow):
         self._refresh_pointer_assist()
         self._refresh_telemetry()
         self._apply_adaptive_tuning()
+        self._refresh_transition_model()
 
     @staticmethod
     def _compute_screen_bounds() -> ScreenBounds:
@@ -411,6 +416,48 @@ class MainWindow(QMainWindow):
         if self.telemetry is not None:
             self.telemetry.close()
         self.telemetry = TelemetryStore(path, enabled=enabled)
+
+    def _observe_pinch_episode(self, gesture, assessment, now):
+        """Fold one frame into the episode tracker and store what resolved.
+
+        Recording is gated on telemetry: with the log off there is nowhere for a
+        row to go, and the tracker's buffer would only grow for nothing.
+        """
+        store = getattr(self, "telemetry", None)
+        tracker = getattr(self, "pinch_episodes", None)
+        if tracker is None or store is None or not getattr(store, "enabled", False):
+            return
+        try:
+            records = tracker.observe(gesture=gesture, assessment=assessment, now=now)
+        except Exception:  # noqa: BLE001 - evidence collection is never the control path
+            return
+        model = getattr(self, "transition_model", None)
+        for record in records:
+            try:
+                score = model.probability(record.features) if model is not None else None
+            except Exception:  # noqa: BLE001
+                score = None
+            try:
+                store.record_transition(
+                    features=record.features,
+                    label=record.label,
+                    outcome=record.outcome,
+                    rule_rejected=record.rule_rejected,
+                    duration=record.duration,
+                    model_score=score,
+                )
+            except Exception:  # noqa: BLE001
+                continue
+
+    def _note_episode_action(self, action, now):
+        """Tell the tracker that a click or drag was actually dispatched."""
+        tracker = getattr(self, "pinch_episodes", None)
+        if tracker is None:
+            return
+        try:
+            tracker.note_action(action, now)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _apply_dynamics(self, gesture, assessment):
         """Downgrade a pinch the hand is only passing through.
@@ -619,6 +666,23 @@ class MainWindow(QMainWindow):
             except Exception:  # noqa: BLE001 - the log is not the control path
                 pass
         return tuning
+
+    def _refresh_transition_model(self):
+        """Load the shadow boundary if one exists; it never decides anything.
+
+        The model only contributes a score to each recorded episode. Promotion
+        to acting on it is a separate, reversible step, and it needs held-out
+        evidence that the model beats the rule first.
+        """
+        temporal = self.config.get("temporal") or {}
+        path = temporal.get("transition_model") or os.path.join(
+            os.path.dirname(os.path.abspath(self.config.config_path)),
+            "transition_model.json",
+        )
+        try:
+            self.transition_model = TransitionModel.load(path)
+        except Exception:  # noqa: BLE001 - a bad model file is not a startup failure
+            self.transition_model = None
 
     def _snap_cursor_position(self, pos):
         """Return the assisted lock position for one raw pointer position."""
@@ -1710,6 +1774,10 @@ class MainWindow(QMainWindow):
         gesture = self.classifier.classify(landmarks, timestamp=frame_time)
         if landmarks:
             assessment = self.hand_dynamics.update(landmarks, frame_time)
+            # The episode tracker watches the classifier's own label, before the
+            # guard rewrites it: otherwise a suppressed pinch would leave no
+            # record, and suppression is exactly what the model has to judge.
+            self._observe_pinch_episode(gesture, assessment, frame_time)
             gesture = self._apply_dynamics(gesture, assessment)
         else:
             self.hand_dynamics.reset()
@@ -1943,6 +2011,7 @@ class MainWindow(QMainWindow):
                         gesture=gesture,
                     )
                 )
+                self._note_episode_action(action, now)
                 self._update_hud_after_dispatch(action, dispatch_result, (screen_x, screen_y))
                 if dispatch_result.executed and intent_decision is not None:
                     self.intent_arbiter.mark_shortcut_committed()
@@ -2049,6 +2118,7 @@ class MainWindow(QMainWindow):
                 expected_target_id=contextual_target_id,
             )
         )
+        self._note_episode_action(action, now)
         self._update_hud_after_dispatch(
             action, dispatch_result, (exec_x, exec_y), is_locked=is_locked, now=now
         )

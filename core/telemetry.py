@@ -23,9 +23,14 @@ import sqlite3
 import threading
 import time
 
+# The vector width lives with the features so the table cannot disagree.
+from .transition_features import FEATURE_COUNT as _FEATURE_COUNT
+
 MAX_ROWS = 20000
 # Candidates grow a few rows per click; this caps a long-lived install.
 MAX_CANDIDATE_ROWS = 100000
+# One row per pinch episode, and only a few thousand are worth keeping.
+MAX_TRANSITION_ROWS = 20000
 # Old data has no value once the ranking question has been answered, and a
 # year-old log only makes the file bigger.
 RETENTION_DAYS = 30
@@ -96,6 +101,21 @@ CREATE TABLE IF NOT EXISTS candidates (
     chosen_raw INTEGER
 );
 CREATE INDEX IF NOT EXISTS candidates_lock ON candidates (lock_id);
+
+-- One row per resolved pinch episode: the feature vector, the label the
+-- outcome implies, and whether the rule had rejected it. Numbers and short
+-- enums only, like every other table here.
+CREATE TABLE IF NOT EXISTS transitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    features TEXT NOT NULL,
+    label INTEGER NOT NULL,
+    outcome TEXT,
+    rule_rejected INTEGER,
+    duration REAL,
+    model_score REAL
+);
+CREATE INDEX IF NOT EXISTS transitions_ts ON transitions (ts);
 """
 
 
@@ -254,6 +274,102 @@ class TelemetryStore:
             except (sqlite3.Error, TypeError, ValueError):
                 return
 
+    def record_transition(
+        self,
+        *,
+        features,
+        label: int,
+        outcome: str = "",
+        rule_rejected: bool = False,
+        duration: float = 0.0,
+        model_score: float | None = None,
+        timestamp: float | None = None,
+    ) -> None:
+        """Store one resolved pinch episode.
+
+        ``features`` is the vector from :mod:`core.transition_features`; it is
+        written as JSON so the trainer reads exactly what the runtime saw.
+        """
+        if not self.enabled:
+            return
+        try:
+            vector = [round(float(value), 6) for value in (features or ())]
+        except (TypeError, ValueError):
+            return
+        if not vector or len(vector) != _FEATURE_COUNT:
+            return
+        stamp = time.time() if timestamp is None else _float_or_none(timestamp)
+        if stamp is None:
+            return
+        with self._lock:
+            if self._connection is None:
+                return
+            try:
+                self._connection.execute(
+                    "INSERT INTO transitions"
+                    " (ts, features, label, outcome, rule_rejected, duration, model_score)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        stamp,
+                        json.dumps(vector),
+                        1 if int(label) else 0,
+                        str(outcome or "")[:32],
+                        1 if rule_rejected else 0,
+                        _float_or_none(duration) or 0.0,
+                        _float_or_none(model_score),
+                    ),
+                )
+                self._pending += 1
+                if self._pending >= _COMMIT_EVERY:
+                    self._connection.commit()
+                    self._pending = 0
+                    self._last_commit = time.monotonic()
+            except (sqlite3.Error, TypeError, ValueError):
+                return
+            self._writes += 1
+            if self._writes % _PRUNE_EVERY == 0:
+                self._prune()
+
+    def transition_rows(self, limit: int | None = None) -> list[dict]:
+        """Return transition episodes oldest first, for training or review."""
+        if self._connection is None:
+            return []
+        query = (
+            "SELECT ts, features, label, outcome, rule_rejected, duration, model_score"
+            " FROM transitions ORDER BY id"
+        )
+        params: tuple = ()
+        if limit is not None:
+            query = (
+                "SELECT ts, features, label, outcome, rule_rejected, duration, model_score"
+                " FROM (SELECT * FROM transitions ORDER BY id DESC LIMIT ?) ORDER BY id"
+            )
+            params = (int(limit),)
+        try:
+            rows = self._connection.execute(query, params).fetchall()
+        except sqlite3.Error:
+            return []
+        result = []
+        for ts, features, label, outcome, rejected, duration, model_score in rows:
+            try:
+                vector = json.loads(features or "[]")
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(vector, list) or len(vector) != _FEATURE_COUNT:
+                continue
+            result.append(
+                {
+                    "ts": ts,
+                    "features": [float(value) for value in vector],
+                    "label": int(label),
+                    "outcome": outcome or "",
+                    "rule_rejected": bool(rejected),
+                    "duration": float(duration or 0.0),
+                    "model_score": None if model_score is None else float(model_score),
+                }
+            )
+        return result
+
     def candidate_groups(self, limit_locks: int = 5000) -> list[dict]:
         """Return candidate rows grouped by lock, oldest first.
 
@@ -303,6 +419,7 @@ class TelemetryStore:
         try:
             self._connection.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
             self._connection.execute("DELETE FROM candidates WHERE ts < ?", (cutoff,))
+            self._connection.execute("DELETE FROM transitions WHERE ts < ?", (cutoff,))
             self._connection.execute(
                 "DELETE FROM events WHERE id NOT IN "
                 "(SELECT id FROM events ORDER BY id DESC LIMIT ?)",
@@ -312,6 +429,11 @@ class TelemetryStore:
                 "DELETE FROM candidates WHERE id NOT IN "
                 "(SELECT id FROM candidates ORDER BY id DESC LIMIT ?)",
                 (MAX_CANDIDATE_ROWS,),
+            )
+            self._connection.execute(
+                "DELETE FROM transitions WHERE id NOT IN "
+                "(SELECT id FROM transitions ORDER BY id DESC LIMIT ?)",
+                (MAX_TRANSITION_ROWS,),
             )
             self._connection.commit()
             self._pending = 0
@@ -400,6 +522,7 @@ class TelemetryStore:
             try:
                 self._connection.execute("DELETE FROM events")
                 self._connection.execute("DELETE FROM candidates")
+                self._connection.execute("DELETE FROM transitions")
                 self._connection.commit()
                 # DELETE only frees pages for reuse; the file itself shrinks
                 # only after VACUUM, and "clear my data" has to mean the disk.

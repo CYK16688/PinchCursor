@@ -231,6 +231,9 @@ DEFAULT_CONFIG = {
     },
     "temporal": {
         "transition_guard": True,
+        # Empty means "transition_model.json beside the config", which is where
+        # scripts/train_transition.py writes by default.
+        "transition_model": "",
     },
     "global_sensitivity": {
         "scroll_speed": 50,
