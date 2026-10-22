@@ -27,7 +27,7 @@
     <path d="M856,358 H908" fill="none" stroke="#4A5364" stroke-width="1.2" marker-end="url(#arrow)"/>
     <path d="M1022,400 V536" fill="none" stroke="#2F5BD0" stroke-width="1.2" marker-end="url(#arrow-accent)"/>
     <path d="M952,568 H842" fill="none" stroke="#4A5364" stroke-width="1.2" marker-end="url(#arrow)"/>
-    <path d="M742,536 V400" fill="none" stroke="#2E5AA8" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow-link)"/>
+    <path d="M820,536 V470 Q820,462 828,462 H952 Q960,462 960,454 V400" fill="none" stroke="#2E5AA8" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow-link)"/>
     <path d="M272,204 V316" fill="none" stroke="#4A5364" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
     <path d="M408,172 H828" fill="none" stroke="#4A5364" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
 
@@ -41,8 +41,8 @@
     <text x="1060" y="487" fill="#4A5364" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="9" letter-spacing="0.06em" text-anchor="middle">ACTION</text>
     <rect x="869" y="546" width="48" height="13" rx="2" fill="#F2F3F7"/>
     <text x="893" y="557" fill="#4A5364" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="9" letter-spacing="0.06em" text-anchor="middle">CG / AX</text>
-    <rect x="750" y="476" width="74" height="13" rx="2" fill="#F2F3F7"/>
-    <text x="787" y="487" fill="#4A5364" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="9" letter-spacing="0.06em" text-anchor="middle">AX TARGETS</text>
+    <rect x="854" y="440" width="72" height="13" rx="2" fill="#F2F3F7"/>
+    <text x="890" y="451" fill="#4A5364" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="9" letter-spacing="0.06em" text-anchor="middle">AX TARGETS</text>
     <rect x="279" y="234" width="86" height="13" rx="2" fill="#F7F8FB"/>
     <text x="322" y="245" fill="#4A5364" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="9" letter-spacing="0.06em" text-anchor="middle">START / STOP</text>
     <rect x="586" y="150" width="56" height="13" rx="2" fill="#F2F3F7"/>

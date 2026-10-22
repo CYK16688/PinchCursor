@@ -71,7 +71,7 @@ ARROWS = [
     # platform boundary
     ("M952,568 H842", "solid", "muted", "CG / AX"),
     # feedback that makes the next click smarter than the last one
-    ("M742,536 V400", "dashed", "link", "AX TARGETS"),
+    ("M820,536 V470 Q820,462 828,462 H952 Q960,462 960,454 V400", "dashed", "link", "AX TARGETS"),
     # the session gate: nothing runs until the user starts it
     ("M272,204 V316", "dashed", "muted", "START / STOP"),
     # configuration is read, never written by the pipeline
@@ -85,7 +85,7 @@ LABELS = {
     "INTENT": (859, 336, 46, 882, 347, ZONE_MASK),
     "ACTION": (1032, 476, 56, 1060, 487, ZONE_MASK),
     "CG / AX": (869, 546, 48, 893, 557, ZONE_MASK),
-    "AX TARGETS": (750, 476, 74, 787, 487, ZONE_MASK),
+    "AX TARGETS": (854, 440, 72, 890, 451, ZONE_MASK),
     "START / STOP": (279, 234, 86, 322, 245, PAPER),
     "CONFIG": (586, 150, 56, 614, 161, ZONE_MASK),
 }

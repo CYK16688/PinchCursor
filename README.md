@@ -53,6 +53,24 @@ Two threads, one lane that owns the pointer. Camera capture and MediaPipe infere
 
 The core (`core/`) is pure Python with no Qt imports, so every decision layer is unit‑testable; the shell (`gui/`) is PySide6; `platform_services/` hides macOS Accessibility and CGEvent behind contracts with a fake‑backed implementation for tests.
 
+### Intent, in detail
+
+![How one frame becomes an intent](docs/intent-pipeline.svg)
+
+Every stage on that spine is a veto, and the vetoes compound. A hand that reads as a pinch but closes all four fingers is downgraded to a point; a point that has not held the activation gesture for 300 ms never reaches the state machine; a click whose best candidate cannot clear a 0.55 posterior is refused rather than guessed — two identical targets side by side split the probability mass and both fail.
+
+| Stage | What it reads | What it rejects |
+|---|---|---|
+| **Track** | smoothed position, time since last sighting | a cursor that jumps while the hand is out of frame |
+| **Classify** | 21 landmarks, thumb–index ratio against your calibrated thresholds | hands at a distance where the ratio means nothing |
+| **Dynamics** | pinch confidence, closing rate of the other three fingers | the classic false pinch — a whole hand closing |
+| **Session gate** | activation gesture held 0.3 s, 2.0 s grace after loss | idle hands resting in view |
+| **Arbiter** | which lane held the hand last, neutral for 3 frames | a combo and a pointer gesture claiming the same frame |
+| **Lanes** | 5 stable frames, DTW distance, 0.3 s dwell | sequences that never completed |
+| **Target resolution** | softmax over accessibility candidates, 0.55 floor, 24–60 px snap | ambiguous neighbours and unreachable targets |
+
+Recorded motions are the one lane that is taught rather than inferred: a trajectory is stored as a 65-dimensional sequence, optionally bound to an accessibility category ("only in scrollable areas"), and matched with DTW against your own templates. Ten prototypes over a 180-frame take cost 7.8 ms — once per completed motion, not per frame.
+
 ### Measured on an Apple M5 Max
 
 | | Standard (640×480 CPU) | Performance (1280×720 Metal) |
@@ -111,13 +129,21 @@ macOS gates the interesting parts. Grant **Camera** (to see your hand) and **Acc
 
 ## Learning loop (optional, local)
 
-```
-normal use ─▶ candidates table (features + two labels) ─▶ train_target_ranker.py
-                                                              │
-                            settings: Bayesian ◀── shadow ──▶ learned ranker
-```
+**There is no online self-learning, and that is deliberate.** A model that retrains on whatever it just saw will learn the user's mistakes, and nothing that moves the pointer is allowed to run without evidence. What the app does adapt to is narrower, and every piece of it is inspectable:
 
-The trainer refuses to run below 200 labelled locks, splits by time rather than at random, and reports its accuracy next to the Bayesian baseline. The runtime only uses a model when it loads cleanly and clears its confidence floor; otherwise it falls back to the deterministic scorer.
+| Mechanism | Trigger | Persists in | What it changes |
+|---|---|---|---|
+| **Pinch calibration** | five pinches in settings | `settings.json` | the enter/exit ratio thresholds for your hand and camera distance |
+| **Recorded motion** | you record one take | `settings.json` (`dynamic_gestures.templates`) | a DTW prototype, optionally bound to an accessibility category |
+| **Target ranker** | `scripts/train_target_ranker.py` over your telemetry | `target_ranker.json` | how candidate targets are scored — never whether a click happens |
+
+The ranker is the only learned model, and it runs behind three gates: it refuses to train below 200 labelled locks, it splits by time rather than at random and prints its validation top-1 next to the Bayesian baseline, and it can start in **shadow** mode, where it logs whether it agrees with the deterministic scorer without touching the pointer. Promotion to `ranker` mode is a setting you change, not something the app decides.
+
+```
+normal use ─▶ candidates table (features + labels) ─▶ train_target_ranker.py
+                                                              │
+                      settings: Bayesian ◀── shadow ──▶ learned ranker
+```
 
 ```bash
 .venv/bin/python scripts/train_target_ranker.py --db ~/path/to/telemetry.sqlite3
