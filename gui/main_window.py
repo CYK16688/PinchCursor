@@ -21,6 +21,7 @@ from core.gesture_classifier import GestureClassifier
 from core.action_coordinator import GestureActionCoordinator
 from core.action_state_machine import ActionState, ActionStateMachine
 from core.assist.features import build_features
+from core.adaptive_tuning import tune_snapping
 from core.assist.ranker import LinearRanker
 from core.assist.target_model import Target, TargetModel
 from core.hand_dynamics import HandDynamics
@@ -359,6 +360,7 @@ class MainWindow(QMainWindow):
         self._refresh_pointer_mapping()
         self._refresh_pointer_assist()
         self._refresh_telemetry()
+        self._apply_adaptive_tuning()
 
     @staticmethod
     def _compute_screen_bounds() -> ScreenBounds:
@@ -474,10 +476,11 @@ class MainWindow(QMainWindow):
         the deterministic pointer lane keeps full authority over every frame.
         """
         assist = self.config.get("pointer_assist") or {}
+        distance, confidence = self._effective_assist_values(assist)
         try:
             model = TargetModel(
-                max_snap_distance=float(assist.get("max_snap_distance", 24.0)),
-                min_confidence=float(assist.get("min_confidence", 0.55)),
+                max_snap_distance=distance,
+                min_confidence=confidence,
                 search_radius=float(assist.get("search_radius", 120.0)),
             )
         except (TypeError, ValueError):
@@ -501,6 +504,121 @@ class MainWindow(QMainWindow):
             # fall back to the deterministic policy.
             self.assist_mode = "bayesian"
         self.action_machine.snap_provider = self._snap_cursor_position
+
+    @staticmethod
+    def _effective_assist_values(assist) -> tuple[float, float]:
+        """Configured assist values, overridden by a learned step when present.
+
+        Reading through this one function keeps the model, the diagnostics page
+        and the tuner's own next input from disagreeing about what is in force.
+        """
+        learned = assist.get("learned")
+        learned = learned if isinstance(learned, dict) else {}
+        # A learned step is anchored to the values it started from. When the
+        # user edits the configured numbers, their choice wins and the stale
+        # adaptation is ignored instead of quietly overriding it.
+        if learned and (
+            learned.get("base_max_snap_distance") != assist.get("max_snap_distance")
+            or learned.get("base_min_confidence") != assist.get("min_confidence")
+        ):
+            learned = {}
+
+        def pick(key, default):
+            for source in (learned, assist):
+                raw = source.get(key)
+                if raw is None or isinstance(raw, bool):
+                    continue
+                try:
+                    number = float(raw)
+                except (TypeError, ValueError):
+                    continue
+                if number != number or number in (float("inf"), float("-inf")):
+                    continue
+                return number
+            return default
+
+        return pick("max_snap_distance", 24.0), pick("min_confidence", 0.55)
+
+    def _apply_adaptive_tuning(self):
+        """Move the aim assist one bounded step from local click outcomes.
+
+        Runs once per launch, and only when telemetry is on and the assist is
+        enabled: without recorded outcomes there is no evidence, and adapting on
+        no evidence is how a product starts guessing. The decision is persisted
+        so the same summary cannot ratchet the values on every restart.
+        """
+        import time
+
+        store = getattr(self, "telemetry", None)
+        if store is None or not getattr(store, "enabled", False):
+            return None
+        assist = self.config.get("pointer_assist") or {}
+        if assist.get("enabled", True) is not True:
+            return None
+        try:
+            summary = store.summary()
+        except Exception:  # noqa: BLE001 - tuning must never block startup
+            return None
+
+        actions = summary.get("actions") or {}
+        clicks = sum(
+            int(actions.get(name, 0) or 0)
+            for name in ("left_click", "right_click", "double_click")
+        )
+        learned = assist.get("learned")
+        learned = learned if isinstance(learned, dict) else {}
+        if (
+            learned.get("base_max_snap_distance") == assist.get("max_snap_distance")
+            and learned.get("base_min_confidence") == assist.get("min_confidence")
+        ):
+            # The summary is cumulative. Re-deciding on evidence that already
+            # produced a decision would ratchet the same bad afternoon tighter
+            # at every launch; only new clicks may move the values.
+            try:
+                last_clicks = int(learned.get("clicks") or 0)
+            except (TypeError, ValueError):
+                last_clicks = 0
+            if clicks <= last_clicks:
+                return None
+        distance, confidence = self._effective_assist_values(assist)
+        tuning = tune_snapping(
+            max_snap_distance=distance,
+            min_confidence=confidence,
+            clicks=clicks,
+            misses=summary.get("click_misses", 0),
+            snaps=summary.get("snaps", 0),
+            mean_snap_distance=summary.get("mean_snap_distance"),
+        )
+
+        if tuning.changed:
+            payload = {
+                "max_snap_distance": tuning.max_snap_distance,
+                "min_confidence": tuning.min_confidence,
+                "base_max_snap_distance": assist.get("max_snap_distance", 24.0),
+                "base_min_confidence": assist.get("min_confidence", 0.55),
+                "clicks": tuning.clicks,
+                "misses": tuning.misses,
+                "reason": tuning.reason,
+                "updated_at": time.time(),
+            }
+            try:
+                self.config.set("pointer_assist", "learned", payload)
+                self.config.save()
+            except OSError:
+                # A read-only config directory is not a reason to fail a launch.
+                return tuning
+            self._refresh_pointer_assist()
+        if tuning.clicks >= 40 or tuning.changed:
+            try:
+                store.record(
+                    "tune",
+                    action=tuning.reason,
+                    confidence=tuning.min_confidence,
+                    snap_distance=tuning.max_snap_distance,
+                )
+            except Exception:  # noqa: BLE001 - the log is not the control path
+                pass
+        return tuning
 
     def _snap_cursor_position(self, pos):
         """Return the assisted lock position for one raw pointer position."""

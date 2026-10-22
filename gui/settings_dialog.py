@@ -277,6 +277,9 @@ class SettingsDialog(QDialog):
             locale = self.language_combo.itemData(index)
             self.language_combo.setItemText(index, self._language_label(locale))
         self.language_combo.setCurrentIndex(max(self.language_combo.findData(selected_language), 0))
+        learned_label = getattr(self, "assist_learned_label", None)
+        if learned_label is not None:
+            learned_label.setText(self._assist_learned_text())
         self.reset_button.setText(tr("common.restore_defaults"))
         self.save_button.setText(tr("common.save"))
         self.cancel_button.setText(tr("common.cancel"))
@@ -1125,6 +1128,12 @@ class SettingsDialog(QDialog):
         self.purge_telemetry_button.clicked.connect(self._purge_telemetry)
         telemetry_form.addRow(self.telemetry_label, self.telemetry_check)
         telemetry_form.addRow("", self.telemetry_hint_label)
+        # What the adaptor currently believes, read straight from the config it
+        # wrote — the same numbers the TargetModel was built with.
+        self.assist_learned_label = QLabel(self._assist_learned_text())
+        self.assist_learned_label.setObjectName("hintLabel")
+        self.assist_learned_label.setWordWrap(True)
+        telemetry_form.addRow("", self.assist_learned_label)
         # A button placed straight into a form row stretches to the panel width
         # and reads as a banner; keep it the size of a normal control.
         purge_row = QHBoxLayout()
@@ -1144,6 +1153,36 @@ class SettingsDialog(QDialog):
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setWidget(widget)
         return scroll
+
+    def _assist_learned_text(self) -> str:
+        """Describe the adapted aim-assist values, or why there are none yet.
+
+        The values come from `pointer_assist.learned`, which only the tuner
+        writes after a real decision; an empty payload means the configured
+        numbers are still in force.
+        """
+        assist = self.config.get("pointer_assist") or {}
+        learned = assist.get("learned")
+        learned = learned if isinstance(learned, dict) else {}
+        if not learned:
+            return tr("settings.advanced.global.assist_learned_empty")
+        raw_distance = learned.get("max_snap_distance")
+        raw_confidence = learned.get("min_confidence")
+        if raw_distance is None or raw_confidence is None:
+            return tr("settings.advanced.global.assist_learned_empty")
+        try:
+            distance = float(raw_distance)
+            confidence = float(raw_confidence)
+        except (TypeError, ValueError):
+            return tr("settings.advanced.global.assist_learned_empty")
+        clicks = learned.get("clicks")
+        clicks = int(clicks) if isinstance(clicks, int) and not isinstance(clicks, bool) else 0
+        return tr(
+            "settings.advanced.global.assist_learned",
+            distance=f"{distance:g}",
+            confidence=f"{confidence:.2f}",
+            clicks=clicks,
+        )
 
     def _purge_telemetry(self):
         """Erase the local event log after an explicit confirmation."""

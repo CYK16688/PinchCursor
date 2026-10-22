@@ -9,7 +9,7 @@
 <p align="center">
   <img alt="platform" src="https://img.shields.io/badge/platform-macOS%2013%2B-111111">
   <img alt="python" src="https://img.shields.io/badge/python-3.13-3776AB">
-  <img alt="tests" src="https://img.shields.io/badge/tests-647%20passing-47D7A1">
+  <img alt="tests" src="https://img.shields.io/badge/tests-671%20passing-47D7A1">
   <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-5E8CFF">
   <img alt="telemetry" src="https://img.shields.io/badge/telemetry-off%20by%20default-8B93A1">
 </p>
@@ -136,6 +136,9 @@ macOS gates the interesting parts. Grant **Camera** (to see your hand) and **Acc
 | **Pinch calibration** | five pinches in settings | `settings.json` | the enter/exit ratio thresholds for your hand and camera distance |
 | **Recorded motion** | you record one take | `settings.json` (`dynamic_gestures.templates`) | a DTW prototype, optionally bound to an accessibility category |
 | **Target ranker** | `scripts/train_target_ranker.py` over your telemetry | `target_ranker.json` | how candidate targets are scored — never whether a click happens |
+| **Aim assist** | every launch, when usage statistics are on | `settings.json` (`pointer_assist.learned`) | the snap radius and confidence floor — bounded, and on evidence |
+
+The aim assist is the one parameter that tunes itself, from the cheapest honest signal the app already records: clicks you had to redo within 1.5 s. Above a 20 % redo rate it narrows the snap by at most 15 % and raises the confidence floor by at most 0.03; after a clean hundred clicks it relaxes the floor slightly. It never widens the snap past the value you configured, and editing that value discards the learned step — your number wins.
 
 The ranker is the only learned model, and it runs behind three gates: it refuses to train below 200 labelled locks, it splits by time rather than at random and prints its validation top-1 next to the Bayesian baseline, and it can start in **shadow** mode, where it logs whether it agrees with the deterministic scorer without touching the pointer. Promotion to `ranker` mode is a setting you change, not something the app decides.
 
@@ -157,7 +160,7 @@ normal use ─▶ candidates table (features + labels) ─▶ train_target_ranke
 
 ```bash
 env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
-# 647 passed
+# 671 passed
 ```
 
 The suite covers the native adapters with fake bindings, the decision layers with synthetic landmarks, the QSS wiring, and the packaging contracts. macOS input itself is exercised by hand — see `docs/VALIDATION.md`.

@@ -218,6 +218,9 @@ DEFAULT_CONFIG = {
         "max_snap_distance": 24.0,
         "min_confidence": 0.55,
         "search_radius": 120.0,
+        # Written by core.adaptive_tuning from local click outcomes; empty means
+        # the values above are still the ones in force.
+        "learned": {},
     },
     "pointer_mapping": {
         "mode": "absolute",
