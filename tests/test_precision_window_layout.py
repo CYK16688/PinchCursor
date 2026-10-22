@@ -95,7 +95,7 @@ def test_precision_main_window_retranslates_existing_controls(monkeypatch, tmp_p
     monkeypatch.setattr(main_window, "create_platform_services", _services_with_missing_accessibility)
     window = main_window.MainWindow()
     try:
-        assert window.windowTitle() == "手势控制"
+        assert window.windowTitle() == "PinchCursor"
         assert window.settings_btn.text() == "设置"
         assert window.camera_summary.text() == "请在设置中选择摄像头"
 
@@ -103,7 +103,7 @@ def test_precision_main_window_retranslates_existing_controls(monkeypatch, tmp_p
         set_locale(config.get("ui", "language"))
         window.retranslate_ui()
 
-        assert window.windowTitle() == "Gesture Control"
+        assert window.windowTitle() == "PinchCursor"
         assert window.settings_btn.text() == "Settings"
         assert window.primary_control_button.text() == "Grant Accessibility access"
         # Permissions are two rows with their own state, not one run-on sentence:

@@ -1,4 +1,4 @@
-"""Shared pytest configuration for the Gesture Control test suite."""
+"""Shared pytest configuration for the PinchCursor test suite."""
 
 from pathlib import Path
 import sys

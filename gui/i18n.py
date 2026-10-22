@@ -1,4 +1,4 @@
-"""Small, deterministic translation catalog for static Gesture Control UI copy."""
+"""Small, deterministic translation catalog for static PinchCursor UI copy."""
 
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ _CATALOGS = {
         "settings.section.advanced": "高级",
         "language.zh_CN": "简体中文",
         "language.en_US": "English",
-        "main.title": "手势控制",
+        "main.title": "PinchCursor",
         "main.subtitle": "桌面手势输入",
         "main.settings": "设置",
         "main.needs_access": "需要授权",
@@ -131,7 +131,7 @@ _CATALOGS = {
         "session.wait_open_hand": "保持张开手掌以激活",
         "session.wait_gesture": "保持 {gesture} 以激活",
         "camera.title": "摄像头",
-        "camera.description": "选择手势控制在会话启动时打开的摄像头。",
+        "camera.description": "选择 PinchCursor 在会话启动时打开的摄像头。",
         "camera.refresh": "刷新摄像头",
         "camera.resolution": "分辨率",
         "camera.width": "宽度",
@@ -224,7 +224,7 @@ _CATALOGS = {
         "settings.dynamic.action.scroll_down": "向下滚动",
         "settings.dynamic.action.custom_hotkey": "自定义快捷键",
         "settings.dynamic.action.unavailable": "不可用操作",
-        "settings.window_title": "手势控制设置",
+        "settings.window_title": "PinchCursor 设置",
         "settings.control.title": "控制会话",
         "settings.control.description": "选择如何激活指针控制",
         "settings.control.activation": "激活",
@@ -419,7 +419,7 @@ _CATALOGS = {
         "settings.section.advanced": "Advanced",
         "language.zh_CN": "Simplified Chinese",
         "language.en_US": "English",
-        "main.title": "Gesture Control",
+        "main.title": "PinchCursor",
         "main.subtitle": "Desktop hand input",
         "main.settings": "Settings",
         "main.needs_access": "Needs access",
@@ -470,7 +470,7 @@ _CATALOGS = {
         "session.wait_open_hand": "Hold open hand to activate",
         "session.wait_gesture": "Hold {gesture} to activate",
         "camera.title": "Camera",
-        "camera.description": "Choose the camera Gesture Control opens when a session starts.",
+        "camera.description": "Choose the camera PinchCursor opens when a session starts.",
         "camera.refresh": "Refresh cameras",
         "camera.resolution": "Resolution",
         "camera.width": "Width",
@@ -563,7 +563,7 @@ _CATALOGS = {
         "settings.dynamic.action.scroll_down": "Scroll down",
         "settings.dynamic.action.custom_hotkey": "Custom shortcut",
         "settings.dynamic.action.unavailable": "Unavailable action",
-        "settings.window_title": "Gesture Control Settings",
+        "settings.window_title": "PinchCursor Settings",
         "settings.control.title": "Control session",
         "settings.control.description": "Choose how pointer control activates",
         "settings.control.activation": "Activation",

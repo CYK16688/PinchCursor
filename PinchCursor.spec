@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""Cross-platform PyInstaller spec for Gesture Control.
+"""Cross-platform PyInstaller spec for PinchCursor.
 
 Build on the target OS (PyInstaller cannot cross-compile):
     macOS   : ./scripts/build_macos_app.sh
@@ -14,8 +14,8 @@ import sys
 
 from PyInstaller.utils.hooks import collect_all
 
-APP_NAME = "Gesture Control"
-BUNDLE_ID = "com.cyk.gesturecontroller.dev"
+APP_NAME = "PinchCursor"
+BUNDLE_ID = "com.cyk16688.pinchcursor"
 
 datas = [
     ("core/models/hand_landmarker.task", "models"),

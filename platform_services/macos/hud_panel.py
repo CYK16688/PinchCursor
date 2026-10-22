@@ -1,4 +1,4 @@
-"""macOS-only native panel policy for the global Gesture Control HUD."""
+"""macOS-only native panel policy for the global PinchCursor HUD."""
 
 
 class MacOSHudPanelController:

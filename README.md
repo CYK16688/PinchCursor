@@ -18,7 +18,7 @@
   <img src="docs/screenshots/main-ready.png" alt="PinchCursor main window" width="880">
 </p>
 
-> **中文简介** — PinchCursor（界面内名称「手势控制」）是一套 macOS 手势输入系统：摄像头识别 21 个手部关键点，用确定性的状态机驱动指针、点击、拖动与滚动。它的重点不是"炫技"，而是把延迟、误触、隐私和可回退性当成第一等公民：核心指针通道永远由状态机独占，机器学习只做建议，全部数据留在本机。
+> **中文简介** — PinchCursor 是一套 macOS 手势输入系统：摄像头识别 21 个手部关键点，用确定性的状态机驱动指针、点击、拖动与滚动。它的重点不是"炫技"，而是把延迟、误触、隐私和可回退性当成第一等公民：核心指针通道永远由状态机独占，机器学习只做建议，全部数据留在本机。
 
 ---
 
@@ -78,7 +78,7 @@ Numbers are from `time.perf_counter` loops in this repository, not from a spec s
 
 ## Install
 
-Requires macOS 13+, Python 3.13, and a camera.
+Requires macOS 15+, Python 3.13, and a camera.
 
 ```bash
 git clone https://github.com/<you>/pinchcursor.git
@@ -92,7 +92,7 @@ Build a standalone `.app` (PyInstaller cannot cross‑compile, so run it on macO
 
 ```bash
 ./scripts/build_macos_app.sh
-open "dist/Gesture Control.app"
+open "dist/PinchCursor.app"
 ```
 
 ### Permissions

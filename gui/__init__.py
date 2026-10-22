@@ -1,1 +1,1 @@
-"""Gesture Control Qt user-interface package."""
+"""PinchCursor Qt user-interface package."""

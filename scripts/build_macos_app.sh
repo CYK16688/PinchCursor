@@ -35,7 +35,7 @@ rm -rf build dist
 
 # The spec file owns the module list, Qt excludes, and data files so that the
 # macOS and Windows builds cannot drift apart.
-env -u PYTHONPATH "$PYTHON" -m PyInstaller --noconfirm --clean "Gesture Control.spec"
+env -u PYTHONPATH "$PYTHON" -m PyInstaller --noconfirm --clean "PinchCursor.spec"
 
 APP_PATH="dist/$APP_NAME.app"
 INFO_PLIST="$APP_PATH/Contents/Info.plist"

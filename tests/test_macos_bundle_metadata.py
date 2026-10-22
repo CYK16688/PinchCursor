@@ -7,8 +7,8 @@ from app_build.macos_bundle import (
 
 
 def test_development_bundle_has_a_stable_identity():
-    assert APP_NAME == "Gesture Control"
-    assert BUNDLE_ID == "com.cyk.gesturecontroller.dev"
+    assert APP_NAME == "PinchCursor"
+    assert BUNDLE_ID == "com.cyk16688.pinchcursor"
 
 
 def test_development_bundle_declares_camera_and_accessibility_purposes():

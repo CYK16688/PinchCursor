@@ -132,7 +132,7 @@ def test_settings_dialog_retranslates_control_permissions_and_children_without_m
         set_locale("en_US")
         dialog.retranslate_ui()
 
-        assert dialog.windowTitle() == "Gesture Control Settings"
+        assert dialog.windowTitle() == "PinchCursor Settings"
         assert dialog.title_label.text() == "Settings"
         assert dialog.reset_button.text() == "Restore defaults"
         assert dialog.control_title_label.text() == "Control session"
@@ -211,11 +211,11 @@ def test_saved_language_refreshes_the_live_main_window(tmp_path, monkeypatch):
     monkeypatch.setattr("gui.settings_dialog.SettingsDialog", AcceptedSettings)
     window = main_window.MainWindow()
     try:
-        assert window.windowTitle() == "手势控制"
+        assert window.windowTitle() == "PinchCursor"
 
         window.open_settings()
 
-        assert window.windowTitle() == "Gesture Control"
+        assert window.windowTitle() == "PinchCursor"
         assert window.settings_btn.text() == "Settings"
     finally:
         window.close()
@@ -238,7 +238,7 @@ def test_cancelled_language_selection_leaves_live_main_window_unchanged(tmp_path
     try:
         window.open_settings()
 
-        assert window.windowTitle() == "手势控制"
+        assert window.windowTitle() == "PinchCursor"
         assert window.settings_btn.text() == "设置"
     finally:
         window.close()

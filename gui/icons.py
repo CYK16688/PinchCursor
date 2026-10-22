@@ -146,21 +146,36 @@ APP_MARK_VIEWBOX = 1024
 
 
 def app_mark_svg(hand_color: str = "#FFFFFF", tile_color: str = "#5E8CFF") -> str:
-    """The product mark at icon scale: an accent tile carrying the hand glyph.
+    """The product mark: a pointer emerging through a lock ring, on a tile.
+
+    The ring is the same shape the HUD shows at the moment a target locks, and
+    the break in it sits exactly where the pointer points, so the mark reads as
+    "aim, then lock" instead of as another cursor glyph. ``hand_color`` keeps its
+    historical name so callers and the icon script stay unchanged.
 
     Shared by the in-app header, the window icon, and the .icns the bundle ships
     so the Dock, the header and the About panel cannot drift apart.
     """
-    # The hand path is authored in a 256 box; fit it to ~62% of the tile.
-    scale = 0.62 * APP_MARK_VIEWBOX / 256
-    offset = (APP_MARK_VIEWBOX - 256 * scale) / 2
+    # Classic pointer silhouette, authored in a unit box with the tip at 0,0.
+    pointer = "M0 0 L0 15 L4 11 L6.6 16.4 L9.4 15.2 L6.8 9.9 L11.6 9.9 Z"
+    # Ring: r=250 around (470,470) with a 64 degree gap facing the pointer tip
+    # at 225 degrees. Two round-capped arcs are clearer than a dashed circle.
+    ring = "M413.8 226.4 A250 250 0 1 1 226.4 413.8"
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" '
         f'viewBox="0 0 {APP_MARK_VIEWBOX} {APP_MARK_VIEWBOX}">'
+        f'<defs>'
+        f'<linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">'
+        f'<stop offset="0" stop-color="#5E8CFF"/>'
+        f'<stop offset="1" stop-color="{tile_color}"/>'
+        f'</linearGradient>'
+        f'</defs>'
         f'<rect width="{APP_MARK_VIEWBOX}" height="{APP_MARK_VIEWBOX}" '
-        f'rx="228" fill="{tile_color}"/>'
-        f'<g transform="translate({offset:.2f} {offset:.2f}) scale({scale:.4f})" '
-        f'fill="{hand_color}">{_HAND_SOLID}</g>'
+        f'rx="228" fill="url(#tile)"/>'
+        f'<path d="{ring}" fill="none" stroke="{hand_color}" '
+        f'stroke-width="34" stroke-linecap="round" opacity="0.72"/>'
+        f'<g transform="translate(360 280) scale(24)" fill="{hand_color}">'
+        f'<path d="{pointer}"/></g>'
         f'</svg>'
     )
 

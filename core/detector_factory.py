@@ -1,4 +1,4 @@
-"""Create the single safe landmark provider used by Gesture Control."""
+"""Create the single safe landmark provider used by PinchCursor."""
 
 from core.base_detector import BaseHandDetector
 

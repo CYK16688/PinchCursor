@@ -16,7 +16,7 @@ class SingleInstanceGuard:
 
     def __init__(self, lock_path: Path | str | None = None):
         self.lock_path = Path(lock_path) if lock_path is not None else (
-            Path.home() / "Library" / "Application Support" / "Gesture Control" / "gesture-control.lock"
+            Path.home() / "Library" / "Application Support" / "PinchCursor" / "pinchcursor.lock"
         )
         self._handle = None
         self._acquired = False
