@@ -32,13 +32,22 @@ def apply_dark_titlebar(window) -> bool:
         if handle == 0:
             return False
 
-        import objc
-        from AppKit import NSAppearance, NSAppearanceNameDarkAqua
+        from AppKit import NSApplication, NSAppearance, NSAppearanceNameDarkAqua
 
-        # Qt's winId() is the backing NSView on macOS; its window() is the
-        # NSWindow whose appearance drives the title bar.
-        view = objc.objc_object(c_void_p=handle)
-        native_window = view.window()
+        # Never manufacture an Objective-C object from a raw pointer: a proxy
+        # that guesses ownership wrong can release a window AppKit and Qt both
+        # still use, and the resulting corruption surfaces later, inside
+        # unrelated allocations. Ask AppKit for a window it already owns instead,
+        # matching the title Qt set on it.
+        application = NSApplication.sharedApplication()
+        title = window.windowTitle()
+        native_window = application.keyWindow()
+        if native_window is None or (title and native_window.title() != title):
+            native_window = None
+            for candidate in application.windows() or ():
+                if candidate.isVisible() and (not title or candidate.title() == title):
+                    native_window = candidate
+                    break
         if native_window is None:
             return False
         appearance = NSAppearance.appearanceNamed_(NSAppearanceNameDarkAqua)

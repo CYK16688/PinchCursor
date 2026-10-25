@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QApplication, QPushButton, QLabel, QFrame, QSizePolicy, QStackedLayout
 )
-from PySide6.QtCore import QSize, Qt, QTimer, QRect, QRectF
+from PySide6.QtCore import QSize, Qt, QTimer, QRect, QRectF, Signal
 from PySide6.QtGui import QCursor, QImage, QPixmap, QPainter
 
 from core.base_detector import BaseHandDetector
@@ -128,6 +128,15 @@ def control_session_status_model(is_running, state, activation_gesture, ready=Tr
 class MainWindow(QMainWindow):
     """主窗口"""
 
+    # AVFoundation runs its access-request completion block on an arbitrary
+    # dispatch queue. Emitting a signal is the only correct way back to the GUI
+    # thread; the crash reports show Qt style polishes executing on
+    # `_dispatch_worker_thread2`, which is exactly what happens when that block
+    # touches a widget directly — and Qt is not thread-safe, so the heap is
+    # corrupted and the abort surfaces later in an unrelated allocation.
+    camera_permission_ready = Signal(bool)
+    camera_permission_settled = Signal(bool)
+
     _GESTURE_LABEL_KEYS = {
         "point": "gesture.point",
         "pinch": "gesture.pinch",
@@ -178,6 +187,10 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        # Both camera completions arrive on AVFoundation's own queue; these
+        # connections are what move them onto the GUI thread.
+        self.camera_permission_ready.connect(self._on_camera_permission_result)
+        self.camera_permission_settled.connect(self._on_camera_permission_settled)
         # Without this the window never paints the stylesheet canvas and the
         # light Fusion palette shows through every gap between cards.
         use_styled_background(self)
@@ -1608,16 +1621,39 @@ class MainWindow(QMainWindow):
             pass
 
     def request_camera_permission_and_start(self):
-        """Request camera TCC access on the Qt main thread before worker startup."""
+        """Request camera TCC access, then start on the GUI thread.
+
+        The provider hands this callable to AVFoundation, which invokes it on
+        an arbitrary dispatch queue. Emitting a signal is what makes the
+        handler run on the Qt main thread; calling the handler directly is a
+        cross-thread widget access, and that is the crash this app shipped.
+        """
         self.platform_services.permission_provider.request_camera_access(
-            self._on_camera_permission_result
+            self._deliver_camera_ready
         )
 
     def request_camera_permission(self):
         """Request Camera access from Settings without starting pointer control."""
         self.platform_services.permission_provider.request_camera_access(
-            lambda _granted: self._refresh_platform_services()
+            self._deliver_camera_settled
         )
+
+    def _deliver_camera_ready(self, granted):
+        """AVFoundation's queue -> signal -> GUI thread.
+
+        This has to be a plain Python callable: PyObjC refuses to turn a
+        builtin method such as ``Signal.emit`` into a block. Emitting from the
+        native queue is safe because the connected slot lives on the GUI
+        thread, so delivery is queued.
+        """
+        self.camera_permission_ready.emit(bool(granted))
+
+    def _deliver_camera_settled(self, granted):
+        self.camera_permission_settled.emit(bool(granted))
+
+    def _on_camera_permission_settled(self, _granted):
+        """Settings-path completion, already back on the GUI thread."""
+        self._refresh_platform_services()
 
     def _on_camera_permission_result(self, granted):
         if not granted:
