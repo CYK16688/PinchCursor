@@ -46,31 +46,58 @@ def test_input_monitoring_native_access_uses_listen_event_apis(monkeypatch):
     assert native.request_input_monitoring_prompt() is False
 
 
-def test_accessibility_prompt_uses_native_prompt_option_dictionary(monkeypatch):
+def test_accessibility_prompt_passes_the_documented_option_dictionary():
     native = MacOSNativeFacade.__new__(MacOSNativeFacade)
-
-    class Quartz:
-        kCFBooleanTrue = True
-
-        @staticmethod
-        def CFDictionaryCreate(_allocator, keys, values, count, _key_callbacks, _value_callbacks):
-            assert keys == ["AXTrustedCheckOptionPrompt"]
-            assert values == [True]
-            assert count == 1
-            return "native-options"
 
     class ApplicationServices:
         kAXTrustedCheckOptionPrompt = "AXTrustedCheckOptionPrompt"
 
         @staticmethod
         def AXIsProcessTrustedWithOptions(options):
-            assert options == "native-options"
+            # Apple documents a CFDictionary carrying the prompt key; PyObjC
+            # bridges a plain dict with the CF callbacks it needs.
+            assert isinstance(options, dict)
+            assert options == {"AXTrustedCheckOptionPrompt": True}
             return False
 
-    native.quartz = Quartz()
     native.application_services = ApplicationServices()
 
     assert native.request_accessibility_prompt() is False
+
+
+def test_the_privacy_panel_deep_link_targets_the_right_anchor():
+    native = MacOSNativeFacade.__new__(MacOSNativeFacade)
+    opened = []
+
+    class _URL:
+        @staticmethod
+        def URLWithString_(url):
+            return url
+
+    class _Workspace:
+        @staticmethod
+        def sharedWorkspace():
+            class Workspace:
+                @staticmethod
+                def openURL_(url):
+                    opened.append(url)
+                    return True
+
+            return Workspace()
+
+    class AppKit:
+        NSURL = _URL
+        NSWorkspace = _Workspace
+
+    native.appkit = AppKit()
+
+    assert native.open_privacy_settings("accessibility") is True
+    assert native.open_privacy_settings("input_monitoring") is True
+    assert opened == [
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",
+    ]
+    assert native.open_privacy_settings("nonsense") is False
 
 
 def test_accessibility_serialization_includes_a_bounded_identifier_without_title_or_value():

@@ -41,6 +41,13 @@ def _icon(name: str) -> str:
     return (resource_root() / "assets" / "icons" / name).as_posix()
 
 
+# QApplication keeps a reference to the palette it was given, but the Python
+# wrapper that built it is collectable. Holding one module-level reference costs
+# nothing and keeps the QPalette data alive for the process lifetime, which is
+# what a crash inside QPalette::detach during a later style polish points at.
+_APP_PALETTE = None
+
+
 def apply_dark_palette(app) -> None:
     """Give Fusion a dark palette before any widget exists.
 
@@ -80,6 +87,8 @@ def apply_dark_palette(app) -> None:
     palette.setColor(QPalette.Disabled, QPalette.Button, QColor("#15171C"))
     palette.setColor(QPalette.Disabled, QPalette.Highlight, QColor("#2B303C"))
 
+    global _APP_PALETTE
+    _APP_PALETTE = palette
     app.setPalette(palette)
 
 

@@ -62,6 +62,9 @@ class UnavailablePermissionProvider:
     def request_input_monitoring_prompt(self) -> bool:
         return False
 
+    def open_privacy_settings(self, pane: str) -> bool:
+        return False
+
 
 class NullHoldShortcutMonitor:
     """Portable no-op monitor used where native global shortcuts are unavailable."""

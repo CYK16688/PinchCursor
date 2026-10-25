@@ -106,6 +106,8 @@ class PermissionProvider(Protocol):
 
     def request_input_monitoring_prompt(self) -> bool: ...
 
+    def open_privacy_settings(self, pane: str) -> bool: ...
+
 
 class HoldShortcutMonitor(Protocol):
     """Observes one configured global shortcut without consuming input."""

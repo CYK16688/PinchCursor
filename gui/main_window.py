@@ -1565,14 +1565,47 @@ class MainWindow(QMainWindow):
         self._refresh_precision_console()
 
     def request_accessibility_permission(self):
-        """Only an explicit user click may open the macOS Accessibility prompt."""
-        self.platform_services.permission_provider.request_accessibility_prompt()
-        self._refresh_platform_services()
+        """Ask macOS once, then put the user in front of the switch.
+
+        The Accessibility prompt appears at most once per app identity per
+        login; after that the API returns false without showing anything. The
+        Privacy pane is the documented fallback, and it is where the switch
+        lives anyway. Platform services are not rebuilt here: a permission
+        change does not alter the native facade, and recreating the shortcut
+        monitor from a button handler was pure risk.
+        """
+        provider = self.platform_services.permission_provider
+        try:
+            granted = bool(provider.request_accessibility_prompt())
+        except Exception:  # noqa: BLE001 - the pane is the fallback, not a crash
+            granted = False
+        if not granted:
+            self._open_privacy_pane("accessibility")
+        self._refresh_permission_status()
+        self._refresh_precision_console()
 
     def request_input_monitoring_permission(self):
-        """Only an explicit user click may open the macOS Input Monitoring prompt."""
-        self.platform_services.permission_provider.request_input_monitoring_prompt()
-        self._refresh_platform_services()
+        """Ask for Input Monitoring, then show the pane that grants it."""
+        provider = self.platform_services.permission_provider
+        try:
+            trusted = bool(provider.request_input_monitoring_prompt())
+        except Exception:  # noqa: BLE001
+            trusted = False
+        if not trusted:
+            self._open_privacy_pane("input_monitoring")
+        self._refresh_permission_status()
+        self._refresh_precision_console()
+
+    def _open_privacy_pane(self, pane: str) -> None:
+        """Deep-link to one Privacy & Security pane, when the backend can."""
+        provider = getattr(self.platform_services, "permission_provider", None)
+        opener = getattr(provider, "open_privacy_settings", None)
+        if not callable(opener):
+            return
+        try:
+            opener(pane)
+        except Exception:  # noqa: BLE001 - a failed deep link is not an error state
+            pass
 
     def request_camera_permission_and_start(self):
         """Request camera TCC access on the Qt main thread before worker startup."""

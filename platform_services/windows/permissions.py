@@ -48,6 +48,10 @@ class WindowsPermissionProvider:
         """Windows has no Input Monitoring authorization, so nothing is requested."""
         return False
 
+    def open_privacy_settings(self, pane: str) -> bool:
+        """Windows privacy pages exist but are not part of this contract's scope."""
+        return False
+
     def request_camera_access(self, completion) -> None:
         """Continue immediately: there is no OS camera prompt to wait for.
 

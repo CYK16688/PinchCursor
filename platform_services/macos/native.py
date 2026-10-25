@@ -23,18 +23,43 @@ class MacOSNativeFacade:
         return bool(self.application_services.AXIsProcessTrusted())
 
     def request_accessibility_prompt(self) -> bool:
-        # The native API expects a CoreFoundation dictionary.  A regular Python
-        # dict can be interpreted as a folder-selection request by newer macOS
-        # privacy UI, which is not an Accessibility authorization flow.
-        options = self.quartz.CFDictionaryCreate(
-            None,
-            [self.application_services.kAXTrustedCheckOptionPrompt],
-            [self.quartz.kCFBooleanTrue],
-            1,
-            None,
-            None,
-        )
+        """Ask macOS for Accessibility, in the shape Apple documents.
+
+        ``AXIsProcessTrustedWithOptions`` takes a CFDictionary carrying
+        ``kAXTrustedCheckOptionPrompt``. Handing it a dictionary built with
+        NULL callbacks passes an object that does not own its keys, which is
+        both outside the documented contract and a heap-corruption hazard;
+        PyObjC bridges a plain dict with the correct CF callbacks.
+
+        The prompt is shown at most once per app identity per login. After
+        that the call simply returns false, which is why every caller also
+        opens the Privacy pane.
+        """
+        options = {self.application_services.kAXTrustedCheckOptionPrompt: True}
         return bool(self.application_services.AXIsProcessTrustedWithOptions(options))
+
+    def open_privacy_settings(self, pane: str) -> bool:
+        """Open the exact Privacy & Security pane for one service.
+
+        This is the documented fallback: when the prompt has already been
+        answered (or suppressed), the switch in System Settings is the only
+        way to grant access, and hunting for the right pane is the part users
+        get wrong.
+        """
+        anchors = {
+            "camera": "Privacy_Camera",
+            "accessibility": "Privacy_Accessibility",
+            "input_monitoring": "Privacy_ListenEvent",
+        }
+        anchor = anchors.get(str(pane))
+        if anchor is None:
+            return False
+        url = f"x-apple.systempreferences:com.apple.preference.security?{anchor}"
+        try:
+            workspace = self.appkit.NSWorkspace.sharedWorkspace()
+            return bool(workspace.openURL_(self.appkit.NSURL.URLWithString_(url)))
+        except Exception:  # noqa: BLE001 - a failed deep link must not surface
+            return False
 
     def input_monitoring_trusted(self) -> bool:
         return bool(self.quartz.CGPreflightListenEventAccess())

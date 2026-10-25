@@ -28,6 +28,10 @@ class MacOSPermissionProvider:
     def request_input_monitoring_prompt(self) -> bool:
         return bool(self.native.request_input_monitoring_prompt())
 
+    def open_privacy_settings(self, pane: str) -> bool:
+        """Deep-link into the pane that owns one permission."""
+        return bool(self.native.open_privacy_settings(pane))
+
     def request_camera_access(self, completion) -> None:
         """Request camera access on the Qt main thread before starting a worker."""
         self.native.request_camera_access(completion)
