@@ -9,7 +9,7 @@
 <p align="center">
   <img alt="platform" src="https://img.shields.io/badge/platform-macOS%2013%2B-111111">
   <img alt="python" src="https://img.shields.io/badge/python-3.13-3776AB">
-  <img alt="tests" src="https://img.shields.io/badge/tests-699%20passing-47D7A1">
+  <img alt="tests" src="https://img.shields.io/badge/tests-707%20passing-47D7A1">
   <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-5E8CFF">
   <img alt="telemetry" src="https://img.shields.io/badge/telemetry-off%20by%20default-8B93A1">
 </p>
@@ -155,6 +155,19 @@ normal use ─▶ candidates table (features + labels) ─▶ train_target_ranke
 .venv/bin/python scripts/train_target_ranker.py --db ~/path/to/telemetry.sqlite3
 ```
 
+Before training anything, ask the log what it has:
+
+```bash
+.venv/bin/python scripts/learning_status.py --db ~/path/to/telemetry.sqlite3
+# pinch episodes   42 / 300
+#   acted+retried  28 (need 60)
+#   dropped        14 (need 60)
+# shadow agreement 100.0% over 42 scored episodes
+# ready to train   no  — waiting on: episodes, positives, negatives
+```
+
+The same two figures appear in Settings → Advanced → Statistics, so you can watch the loop fill up without opening a terminal. `ready to train yes` is the trainer's own gate, not a separate estimate.
+
 <p align="center">
   <img src="docs/screenshots/settings-stats.png" alt="Usage statistics" width="820">
 </p>
@@ -163,7 +176,7 @@ normal use ─▶ candidates table (features + labels) ─▶ train_target_ranke
 
 ```bash
 env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
-# 699 passed
+# 707 passed
 ```
 
 The suite covers the native adapters with fake bindings, the decision layers with synthetic landmarks, the QSS wiring, and the packaging contracts. macOS input itself is exercised by hand — see `docs/VALIDATION.md`.

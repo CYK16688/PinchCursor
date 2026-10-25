@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from core.learning_report import TRANSITION_MIN_EPISODES, build_status
 from core.telemetry import TelemetryStore
 
 from .i18n import tr
@@ -86,6 +87,10 @@ class DiagnosticsPage(QWidget):
         self.executed_value = self._add_row(form, self.executed_label)
         self.latency_label = QLabel()
         self.latency_value = self._add_row(form, self.latency_label)
+        self.episodes_label = QLabel()
+        self.episodes_value = self._add_row(form, self.episodes_label)
+        self.shadow_label = QLabel()
+        self.shadow_value = self._add_row(form, self.shadow_label)
         self.size_label = QLabel()
         self.size_value = self._add_row(form, self.size_label)
         self._value_labels = (
@@ -94,6 +99,8 @@ class DiagnosticsPage(QWidget):
             self.snaps_value,
             self.executed_value,
             self.latency_value,
+            self.episodes_value,
+            self.shadow_value,
             self.size_value,
         )
 
@@ -124,12 +131,14 @@ class DiagnosticsPage(QWidget):
         self.snaps_label.setText(tr("settings.advanced.diagnostics.snaps"))
         self.executed_label.setText(tr("settings.advanced.diagnostics.executed"))
         self.latency_label.setText(tr("settings.advanced.diagnostics.latency"))
+        self.episodes_label.setText(tr("settings.advanced.diagnostics.episodes"))
+        self.shadow_label.setText(tr("settings.advanced.diagnostics.shadow"))
         self.size_label.setText(tr("settings.advanced.diagnostics.size"))
 
     # -- data --------------------------------------------------------------
     def refresh(self) -> None:
         """Re-read the log and repaint; an unreadable log shows the empty state."""
-        summary, size_bytes = self._load()
+        summary, size_bytes, learning = self._load()
         if not summary or not summary.get("total"):
             self._render_empty()
             return
@@ -140,6 +149,8 @@ class DiagnosticsPage(QWidget):
         self.snaps_value.setText(_format_count(summary.get("snaps")))
         self.executed_value.setText(_format_rate(summary.get("executed_rate")))
         self.latency_value.setText(_format_latency(summary.get("mean_latency_ms")))
+        self.episodes_value.setText(_format_episodes(learning))
+        self.shadow_value.setText(_format_shadow(learning))
         self.size_value.setText(_format_size(size_bytes))
 
     def _render_empty(self) -> None:
@@ -154,20 +165,21 @@ class DiagnosticsPage(QWidget):
         for row in self._metric_rows:
             self.form.setRowVisible(row, visible)
 
-    def _load(self) -> tuple[dict | None, int]:
-        """Return ``(summary, size_bytes)``; ``(None, 0)`` when unreadable."""
+    def _load(self):
+        """Return ``(summary, size_bytes, learning)``; empty values if unreadable."""
         # TelemetryStore creates the database when it opens one, so a missing
         # file has to be rejected before the store is ever constructed.
         if not os.path.isfile(self.store_path):
-            return None, 0
+            return None, 0, None
         store = None
         try:
             store = TelemetryStore(self.store_path, enabled=True)
-            return store.summary(), store.size_bytes()
+            learning = build_status(store.transition_rows())
+            return store.summary(), store.size_bytes(), learning
         except Exception:
             # A damaged or unreadable log is exactly when someone opens this
             # page; it must read as "no data" rather than break Settings.
-            return None, 0
+            return None, 0, None
         finally:
             if store is not None:
                 try:
@@ -180,6 +192,20 @@ def _click_total(summary: dict) -> int:
     """Sum the click actions; the store reports them individually."""
     actions = summary.get("actions") or {}
     return sum(count for action, count in actions.items() if action in _CLICK_ACTIONS)
+
+
+def _format_episodes(learning) -> str:
+    """Progress toward the trainer's gate, not a bare count."""
+    if learning is None:
+        return EMPTY_VALUE
+    return f"{learning.episodes} / {TRANSITION_MIN_EPISODES}"
+
+
+def _format_shadow(learning) -> str:
+    """Agreement between the shadow model and the rule it would replace."""
+    if learning is None or learning.shadow_agreement is None:
+        return EMPTY_VALUE
+    return f"{learning.shadow_agreement * 100:.1f}%"
 
 
 def _format_count(value) -> str:

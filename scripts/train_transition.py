@@ -27,13 +27,12 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from core.learning_report import (  # noqa: E402
+    TRANSITION_MIN_EPISODES as MIN_EPISODES,
+    TRANSITION_MIN_PER_CLASS as MIN_PER_CLASS,
+)
 from core.telemetry import TelemetryStore  # noqa: E402
 from core.transition_features import FEATURE_COUNT, FEATURE_NAMES  # noqa: E402
-
-# One episode per pinch is a much weaker signal than one click per lock, so the
-# bar is higher than the ranker's 200 locks.
-MIN_EPISODES = 300
-MIN_PER_CLASS = 60
 EPOCHS = 500
 LEARNING_RATE = 0.2
 L2 = 0.01
