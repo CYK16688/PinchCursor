@@ -101,6 +101,14 @@ Build a standalone `.app` (PyInstaller cannot cross‑compile, so run it on macO
 open "dist/PinchCursor.app"
 ```
 
+The script signs ad-hoc by default, which is fine for a one-off run but resets every TCC grant on the next rebuild: macOS keys an ad-hoc app's Accessibility and Input Monitoring permissions to the binary hash, so each build looks like a different app. Pass your signing identity once and the grants survive:
+
+```bash
+CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./scripts/build_macos_app.sh
+```
+
+Either way the app needs three grants, in **System Settings → Privacy & Security**: Camera, Accessibility (move the pointer, post clicks) and Input Monitoring (read the hold-to-activate shortcut). Accessibility and Input Monitoring only take effect after the app is quit and reopened.
+
 ### Permissions
 
 macOS gates the interesting parts. Grant **Camera** (to see your hand) and **Accessibility** (to move the pointer and read the UI). Input Monitoring is only needed if you use the hold‑to‑activate shortcut. Rebuilding the app with an ad‑hoc signature resets these grants — expect to re‑approve once.
