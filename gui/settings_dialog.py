@@ -335,6 +335,8 @@ class SettingsDialog(QDialog):
         self.request_accessibility_button.setText(tr("settings.permissions.request_accessibility"))
         self.request_camera_button.setText(tr("settings.permissions.request_camera"))
         self.request_input_monitoring_button.setText(tr("settings.permissions.request_input_monitoring"))
+        self.recheck_permissions_button.setText(tr("settings.permissions.recheck"))
+        self.restart_hint_label.setText(tr("settings.permissions.restart_hint"))
 
         self.advanced_title_label.setText(tr("settings.advanced.title"))
         self.advanced_copy_label.setText(tr("settings.advanced.description"))
@@ -830,8 +832,60 @@ class SettingsDialog(QDialog):
             requests_row.addWidget(button)
         requests_row.addStretch()
         layout.addLayout(requests_row)
+        self.recheck_permissions_button = QPushButton(tr("settings.permissions.recheck"))
+        self.recheck_permissions_button.clicked.connect(self._recheck_permissions)
+        recheck_row = QHBoxLayout()
+        recheck_row.addWidget(self.recheck_permissions_button)
+        recheck_row.addStretch()
+        layout.addLayout(recheck_row)
+        # Apple grants these two only to a freshly launched process; saying so
+        # here is cheaper than letting the user conclude the switch did nothing.
+        self.restart_hint_label = QLabel(tr("settings.permissions.restart_hint"))
+        self.restart_hint_label.setObjectName("hintLabel")
+        self.restart_hint_label.setWordWrap(True)
+        layout.addWidget(self.restart_hint_label)
         layout.addStretch()
         return widget
+
+    def refresh_permissions(self, provider=None) -> None:
+        """Re-read the three authorization states without rebuilding the page."""
+        if provider is None:
+            parent = self.parent()
+            provider = getattr(
+                getattr(parent, "platform_services", None), "permission_provider", None
+            )
+        if provider is None:
+            # Detached from a window there is no live provider to ask, and
+            # building platform services here would open native panels.
+            return
+        try:
+            snapshot = provider.snapshot()
+        except Exception:  # noqa: BLE001 - a status refresh must never fail loudly
+            return
+        for key, state in (
+            ("camera", getattr(snapshot, "camera", None)),
+            ("accessibility", getattr(snapshot, "accessibility", None)),
+            ("input_monitoring", getattr(snapshot, "input_monitoring", None)),
+        ):
+            row = self.permission_dots.get(key)
+            if row is None:
+                continue
+            dot, value_label = row
+            semantic, value_semantic = self._permission_semantics(state)
+            for widget, name in ((dot, semantic), (value_label, value_semantic)):
+                widget.setProperty("semantic", name)
+                widget.style().unpolish(widget)
+                widget.style().polish(widget)
+            value_label.setText(self._permission_label(state))
+
+    def _recheck_permissions(self, parent=None):
+        """Ask the window to re-read the system, then repaint these rows."""
+        parent = parent if parent is not None else self.parent()
+        refresh = getattr(parent, "_refresh_permission_status", None)
+        if callable(refresh):
+            refresh()
+        provider = getattr(getattr(parent, "platform_services", None), "permission_provider", None)
+        self.refresh_permissions(provider)
 
     def _request_accessibility_from_parent(self):
         parent = self.parent()
