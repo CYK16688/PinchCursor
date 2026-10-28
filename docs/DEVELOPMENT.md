@@ -50,7 +50,7 @@ env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
 **Check the exit code, not just the pass count.** The suite reports its verdict
 and then `tests/conftest.py` exits the process before CPython interpreter
 finalization, because PySide6 6.12 aborts there on macOS (see the comment block
-in that file). A run is only green when it prints `366 passed` **and** exits `0`.
+in that file). A run is only green when all collected tests pass **and** it exits `0`.
 
 ## Build the macOS development app
 
@@ -58,15 +58,15 @@ in that file). A run is only green when it prints `366 passed` **and** exits `0`
 . .venv/bin/activate
 python -m pip install -e ".[macos,macos-build]"
 ./scripts/build_macos_app.sh
-open "dist/Gesture Control.app"
+open "dist/PinchCursor.app"
 ```
 
-Both platforms build from the single shared spec `Gesture Control.spec`, so the
+Both platforms build from the single shared spec `PinchCursor.spec`, so the
 module lists and Qt excludes cannot drift apart.
 
-The development bundle uses the identifier `com.cyk.gesturecontroller.dev` and is
+The development bundle uses the identifier `com.cyk16688.pinchcursor` and is
 ad-hoc signed by default. macOS Privacy & Security grants Camera and
-Accessibility permissions to **Gesture Control**, not to `main.py` or Homebrew
+Accessibility permissions to **PinchCursor**, not to `main.py` or Homebrew
 Python.
 
 An ad-hoc signature changes on every rebuild, so macOS re-prompts for both
@@ -91,7 +91,7 @@ py -3.13 -m venv .venv
 pwsh .\scripts\build_windows.ps1
 ```
 
-Output: `dist\Gesture Control\Gesture Control.exe` (onedir, windowed).
+Output: `dist\PinchCursor\PinchCursor.exe` (onedir, windowed).
 
 ## Manual macOS prerequisites
 
@@ -109,3 +109,9 @@ Output: `dist\Gesture Control\Gesture Control.exe` (onedir, windowed).
 5. Test pointer movement, click, drag stop safety, scrolling, configured Command-key shortcuts, and cross-application UI-context filtering.
 
 Never expect a permission prompt during continuous hand tracking; permission requests must result from an explicit UI action.
+
+## Product icon
+
+Use `gui/resources/pinchcursor.png` as the only source. See [Branding](BRANDING.md)
+for regeneration instructions and the generation record. Platform exports are
+tracked; `build/`, `dist/` and Python caches are disposable local output.

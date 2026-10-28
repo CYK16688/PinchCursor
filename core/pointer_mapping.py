@@ -53,6 +53,13 @@ class ScreenBounds:
         cy = min(max(int(round(y)), self.y), self.bottom)
         return (cx, cy)
 
+    def clamp_float(self, x: float, y: float) -> tuple[float, float]:
+        """Clamp control evidence without quantizing before the final output."""
+        return (
+            min(max(float(x), self.x), self.right),
+            min(max(float(y), self.y), self.bottom),
+        )
+
 
 def _finite_point(pos) -> tuple[float, float] | None:
     try:
@@ -86,13 +93,13 @@ class AbsoluteMapper:
     def reset(self) -> None:
         return None
 
-    def map(self, pos, frame_size, bounds: ScreenBounds) -> tuple[int, int] | None:
+    def map(self, pos, frame_size, bounds: ScreenBounds) -> tuple[float, float] | None:
         point = _finite_point(pos)
         size = _frame_size(frame_size)
         if point is None or size is None:
             return None
         width, height = size
-        return bounds.clamp(
+        return bounds.clamp_float(
             bounds.x + point[0] / width * bounds.width,
             bounds.y + point[1] / height * bounds.height,
         )
@@ -126,7 +133,7 @@ class RelativeMapper:
             raise ValueError("gain must be a positive finite number")
         self.gain = value
         self._hand_anchor: tuple[float, float] | None = None
-        self._cursor_anchor: tuple[int, int] | None = None
+        self._cursor_anchor: tuple[float, float] | None = None
 
     def begin(self, pos, frame_size, bounds: ScreenBounds, cursor=None) -> None:
         """Fix the anchor pair; ``cursor`` defaults to the display centre."""
@@ -138,17 +145,17 @@ class RelativeMapper:
         width, height = size
         self._hand_anchor = (point[0] / width, point[1] / height)
         if cursor is None:
-            self._cursor_anchor = bounds.clamp(
+            self._cursor_anchor = bounds.clamp_float(
                 bounds.x + bounds.width / 2, bounds.y + bounds.height / 2
             )
         else:
-            self._cursor_anchor = bounds.clamp(cursor[0], cursor[1])
+            self._cursor_anchor = bounds.clamp_float(cursor[0], cursor[1])
 
     def reset(self) -> None:
         self._hand_anchor = None
         self._cursor_anchor = None
 
-    def map(self, pos, frame_size, bounds: ScreenBounds) -> tuple[int, int] | None:
+    def map(self, pos, frame_size, bounds: ScreenBounds) -> tuple[float, float] | None:
         point = _finite_point(pos)
         size = _frame_size(frame_size)
         if point is None or size is None:
@@ -161,7 +168,7 @@ class RelativeMapper:
             return self._cursor_anchor
         dx = (point[0] / width - self._hand_anchor[0]) * bounds.width * self.gain
         dy = (point[1] / height - self._hand_anchor[1]) * bounds.height * self.gain
-        return bounds.clamp(self._cursor_anchor[0] + dx, self._cursor_anchor[1] + dy)
+        return bounds.clamp_float(self._cursor_anchor[0] + dx, self._cursor_anchor[1] + dy)
 
     def unmap(self, screen, frame_size, bounds: ScreenBounds) -> tuple[int, int] | None:
         """Relative mapping has no stable inverse; report the hand anchor."""

@@ -60,7 +60,7 @@ def test_relative_displacement_scales_with_gain():
         mapper.begin((320, 240), FRAME, bounds, cursor=(500, 250))
 
         # 10 % of the frame to the right = 100 px at gain 1.
-        assert mapper.map((384, 240), FRAME, bounds)[0] == expected
+        assert mapper.map((384, 240), FRAME, bounds)[0] == pytest.approx(expected)
 
 
 def test_relative_clamps_inside_the_display_union():
@@ -113,3 +113,13 @@ def test_gain_must_be_positive_and_finite():
         RelativeMapper(gain=0)
     with pytest.raises(ValueError):
         RelativeMapper(gain=float("inf"))
+
+
+def test_mapping_preserves_subpixel_control_evidence_until_final_clamp():
+    bounds = ScreenBounds(0, 0, 2560, 1440)
+    absolute = AbsoluteMapper()
+    assert absolute.map((100.125, 100.125), FRAME, bounds) == (400.5, 300.375)
+    relative = RelativeMapper(gain=1.4)
+    relative.begin((100.0, 100.0), FRAME, bounds, cursor=(400.25, 300.25))
+    assert relative.map((100.125, 100.125), FRAME, bounds) == pytest.approx((400.95, 300.775))
+    assert bounds.clamp(400.95, 300.775) == (401, 301)

@@ -11,7 +11,8 @@ from gui import main_window
 from platform_services.contracts import ActionResult
 
 
-def test_process_frame_uses_one_worker_timestamp_across_the_control_lane():
+def test_process_frame_uses_one_worker_timestamp_across_the_control_lane(monkeypatch):
+    monkeypatch.setattr(main_window.time, "monotonic", lambda: 1.234)
     app = QApplication.instance() or QApplication([])
     window = main_window.MainWindow()
     observed = {}

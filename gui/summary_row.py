@@ -9,14 +9,12 @@ tracking, where small targets cost disproportionately.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QPushButton, QSizePolicy
 
 
-class SummaryRow(QFrame):
+class SummaryRow(QPushButton):
     """One fact about the current session, clickable to edit it in Settings."""
-
-    clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -24,11 +22,34 @@ class SummaryRow(QFrame):
         self.setCursor(Qt.PointingHandCursor)
         # Hover feedback needs the widget to receive enter/leave events.
         self.setAttribute(Qt.WA_Hover, True)
+        # These rows are the only way into Settings besides the gear, so they
+        # have to be reachable without a mouse: tab to the row, Space/Return to
+        # open it. A clickable widget that cannot take focus is invisible to
+        # keyboard and VoiceOver users alike.
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setAutoDefault(False)
+        policy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
 
-    def mouseReleaseEvent(self, event):
-        """Act only on a release inside the row, like a real button."""
-        if event.button() == Qt.LeftButton and self.rect().contains(
-            event.position().toPoint()
-        ):
-            self.clicked.emit()
-        super().mouseReleaseEvent(event)
+    def sizeHint(self):
+        size = super().sizeHint()
+        return size.expandedTo(self.layout().totalSizeHint()) if self.layout() else size
+
+    def minimumSizeHint(self):
+        size = super().minimumSizeHint()
+        return size.expandedTo(self.layout().totalMinimumSize()) if self.layout() else size
+
+    def heightForWidth(self, width):
+        layout = self.layout()
+        if layout and layout.hasHeightForWidth():
+            return max(self.minimumSizeHint().height(), layout.totalHeightForWidth(width))
+        return self.sizeHint().height()
+
+    def keyPressEvent(self, event):
+        """Activate on Space or Return, the two keys a button answers to."""
+        if event.key() in (Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter):
+            self.click()
+            event.accept()
+            return
+        super().keyPressEvent(event)

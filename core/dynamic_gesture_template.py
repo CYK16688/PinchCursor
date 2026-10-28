@@ -173,6 +173,15 @@ class DynamicGestureRuntimeMatcher:
         self._last_fired_at = current_time
         return winner
 
+    def rearm(self) -> None:
+        """Accept a lifecycle-verified neutral boundary without clearing cooldown.
+
+        Completed-take callers deliberately exclude neutral frames from DTW.
+        Their lifecycle can rearm this one-shot gate explicitly after observing
+        neutral, while ``ingest`` remains exclusive to actual recorded takes.
+        """
+        self._armed = True
+
     def reset(self) -> None:
         """Forget the current live gesture sequence after a tracking boundary."""
         self._armed = True

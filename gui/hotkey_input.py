@@ -1,8 +1,22 @@
-"""Reusable read-only shortcut capture field."""
+"""Reusable read-only shortcut capture field.
+
+The field emits the same canonical token vocabulary that
+``utils/hotkey_validation.normalize_hotkey`` accepts, because a chord the user
+can type here must be a chord the runtime can persist and inject. On macOS the
+system modifier is ⌘ and the canonical token for it is ``cmd``; emitting ``win``
+made every ⌘ combination invalid, and validation then discarded the entire combo
+on save without telling the user.
+"""
+
+import sys
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QLineEdit
+
+# The Command key on macOS, the Windows key elsewhere. Both normalize to the
+# same persisted token so a settings file stays meaningful across platforms.
+_META_TOKEN = "cmd" if sys.platform == "darwin" else "win"
 
 
 class HotkeyInput(QLineEdit):
@@ -14,7 +28,7 @@ class HotkeyInput(QLineEdit):
         Qt.ControlModifier: "ctrl",
         Qt.AltModifier: "alt",
         Qt.ShiftModifier: "shift",
-        Qt.MetaModifier: "win",
+        Qt.MetaModifier: _META_TOKEN,
     }
 
     def __init__(self, parent=None):
@@ -60,4 +74,8 @@ class HotkeyInput(QLineEdit):
             return special_keys[key]
         if Qt.Key_F1 <= key <= Qt.Key_F12:
             return f"f{key - Qt.Key_F1 + 1}"
-        return QKeySequence(key).toString().lower() or None
+        # A single character only: QKeySequence().toString() can return a
+        # modifier-prefixed or multi-character label that is not a terminal key,
+        # and a token like that fails validation later without an explanation.
+        text = QKeySequence(key).toString().lower()
+        return text if len(text) == 1 else None

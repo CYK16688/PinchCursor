@@ -120,7 +120,9 @@ def test_main_window_reports_selected_camera_unavailable_without_opening_fallbac
         assert service.open_calls == [("usb-missing", 640, 480)]
         assert legacy_calls == []
         assert window.is_running is False
-        assert window.status_indicator.text() == f"● {tr('main.selected_camera_unavailable')}"
+        # The state bullet moved out of the text and into the themed dot.
+        assert window.status_indicator.text() == tr("main.selected_camera_unavailable")
+        assert window.state_dot.property("semantic") == "denied"
     finally:
         window.close()
 

@@ -26,7 +26,7 @@ class TargetTracker:
         self.edge_direction = (0, 0)  # 边缘方向
         self.pre_lost_velocity = (0, 0)  # 丢失前的速度（用于边缘预测）
 
-    def update(self, landmarks, frame_shape=None, timestamp=None):
+    def update(self, landmarks, frame_shape=None, timestamp=None, *, position=None):
         """更新跟踪状态
 
         Args:
@@ -41,7 +41,10 @@ class TargetTracker:
 
         if landmarks:
             # 检测到手部 - 使用食指指尖
-            raw_pos = (landmarks[8][0], landmarks[8][1])
+            # A qualified pinch transports the pre-closure fingertip with the
+            # palm. Keep classification on the original landmarks while this
+            # independent motion channel excludes finger articulation.
+            raw_pos = position if position is not None else (landmarks[8][0], landmarks[8][1])
 
             # 平滑位置更新
             if self.smooth_pos is None:
@@ -53,10 +56,10 @@ class TargetTracker:
                     alpha * raw_pos[1] + (1 - alpha) * self.smooth_pos[1]
                 )
 
-            pos = (int(self.smooth_pos[0]), int(self.smooth_pos[1]))
+            pos = self.smooth_pos
 
             # 计算速度
-            if self.last_pos and self.last_time:
+            if self.last_pos is not None and self.last_time is not None:
                 dt = now - self.last_time
                 if dt > 0:
                     vx = (pos[0] - self.last_pos[0]) / dt
@@ -156,9 +159,9 @@ class TargetTracker:
                 pred_y = self.last_pos[1] + self.velocity[1] * dt * 0.3 * decay
 
             # 更新last_pos以便连续预测
-            self.last_pos = (int(pred_x), int(pred_y))
+            self.last_pos = (pred_x, pred_y)
             self.last_time = now
 
-            return (int(pred_x), int(pred_y)), False
+            return self.last_pos, False
 
         return None, False

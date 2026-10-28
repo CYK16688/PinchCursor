@@ -49,7 +49,7 @@ def test_hand_detector_returns_exactly_21_finite_pixel_landmarks():
     landmarks = detector.get_landmarks(_result(points), (480, 640, 3))
 
     assert len(landmarks) == 21
-    assert landmarks[8] == (128, 76, 0.08)
+    assert landmarks[8] == pytest.approx((128, 76.8, 0.08))
 
 
 @pytest.mark.parametrize(
@@ -61,7 +61,8 @@ def test_hand_detector_returns_exactly_21_finite_pixel_landmarks():
         [(0.0, 0.0, math.inf)] * 21,
     ),
 )
-def test_main_window_fails_closed_when_a_worker_frame_breaks_the_landmark_contract(landmarks):
+def test_main_window_fails_closed_when_a_worker_frame_breaks_the_landmark_contract(landmarks, monkeypatch):
+    monkeypatch.setattr(main_window.time, "monotonic", lambda: 1.0)
     app = QApplication.instance() or QApplication([])
     window = main_window.MainWindow()
     released = []
@@ -111,7 +112,8 @@ def test_empty_landmark_list_is_treated_consistently_as_hand_loss_for_edge_feedb
         window.close()
 
 
-def test_repeated_invalid_landmark_frames_emit_only_one_native_drag_release():
+def test_repeated_invalid_landmark_frames_emit_only_one_native_drag_release(monkeypatch):
+    monkeypatch.setattr(main_window.time, "monotonic", lambda: 1.001)
     class Native:
         def __init__(self):
             self.events = []

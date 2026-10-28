@@ -3,13 +3,13 @@
 **Turn your Mac into a touchless workstation.** PinchCursor reads your hand from the built‑in camera and drives the pointer — move, click, drag, scroll, run shortcuts — while keeping every decision deterministic, local, and reversible.
 
 <p align="center">
-  <img src="docs/logo.png" width="128" alt="PinchCursor icon">
+  <img src="gui/resources/pinchcursor.png" width="128" alt="PinchCursor icon">
 </p>
 
 <p align="center">
-  <img alt="platform" src="https://img.shields.io/badge/platform-macOS%2013%2B-111111">
+  <img alt="platform" src="https://img.shields.io/badge/platform-macOS%2015%2B-111111">
   <img alt="python" src="https://img.shields.io/badge/python-3.13-3776AB">
-  <img alt="tests" src="https://img.shields.io/badge/tests-707%20passing-47D7A1">
+  <img alt="tests" src="https://img.shields.io/badge/tests-1353%20passing-47D7A1">
   <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-5E8CFF">
   <img alt="telemetry" src="https://img.shields.io/badge/telemetry-off%20by%20default-8B93A1">
 </p>
@@ -47,17 +47,28 @@ Most gesture demos die at the same three places: the cursor jitters, a fist clos
 
 ## How it works
 
-![PinchCursor runtime architecture](docs/architecture.svg)
+```mermaid
+flowchart LR
+    Camera[Camera + MediaPipe worker] --> Latest[Latest observation mailbox]
+    Latest --> Engine[ControlEngine / control thread]
+    Engine --> Guard[InputGuard + watchdog]
+    Guard --> Native[Native mouse events]
+    AX[Accessibility worker] -. fresh cached targets .-> Engine
+    Engine -. bounded records .-> Log[Telemetry worker]
+    Engine -. latest snapshot .-> UI[Qt preview + HUD]
+```
 
-Two threads, one lane that owns the pointer. Camera capture and MediaPipe inference run on a worker thread, so a slow frame can never stall the cursor; classification, arbitration and the pointer state machine run deterministically on the main thread; `platform_services/` is the only place `ctypes` touches macOS, which is why the fake-backed tests can drive the whole pipeline without a camera or an accessibility grant.
+Camera capture and MediaPipe inference submit directly to a dedicated control thread through a single-slot mailbox. `ControlEngine` owns classification, temporal arbitration and action lifecycles; the GUI only renders snapshots. An independent input watchdog expires camera evidence after 250 ms and attempts to release held buttons even when the GUI stops processing events. Native dispatch and release are serialized. Stop revokes the session before waiting for workers, so an in-flight frame cannot restart input. Accessibility and telemetry have bounded background queues; neither blocks the control thread. See [the runtime contract](docs/CONTROL_ARCHITECTURE.md).
 
-The core (`core/`) is pure Python with no Qt imports, so every decision layer is unit‑testable; the shell (`gui/`) is PySide6; `platform_services/` hides macOS Accessibility and CGEvent behind contracts with a fake‑backed implementation for tests.
+Click admission and targeting use the same continuous episode: qualified open pointing, contraction, confirmed closure and release. The pre-closure fingertip is transported with the palm, and a short numeric filter history reconstructs the aimed trajectory without finger-curl displacement. During an unconfirmed candidate, the visible pointer continues following the fingertip while a separate branch stores the reconstructed target. Confirmation locks that target; separate palm-driven motion controls dragging. Safe open pointing resumes movement after cancellation without prematurely rearming a click. Confirmed opening releases the button; uncertain evidence cancels the interaction. Settled pointing can transition into a held thumb gesture for continuous scrolling, with the aimed position fixed and no dependency on accessibility target discovery. Floating-point observations are preserved until input dispatch, and sustained small corrections can settle through the resting-jitter dead zone.
+
+The decision engine and its runtime are Python modules without Qt imports. The camera worker and GUI shell use PySide6; `platform_services/` hides macOS Accessibility and CGEvent behind contracts with fake implementations for tests.
 
 ### Intent, in detail
 
 ![How one frame becomes an intent](docs/intent-pipeline.svg)
 
-Every stage on that spine is a veto, and the vetoes compound. A hand that reads as a pinch but closes all four fingers is downgraded to a point; a point that has not held the activation gesture for 300 ms never reaches the state machine; a click whose best candidate cannot clear a 0.55 posterior is refused rather than guessed — two identical targets side by side split the probability mass and both fail.
+Motion evidence, activation and lane ownership decide whether input may proceed. Whole-hand closing, isolated pinch flashes and inconsistent tracking cancel a click candidate. In gesture-activation mode, the activation pose must be held before control begins. Target assistance is optional: when no candidate clears its confidence threshold, the reconstructed aim remains the click target.
 
 | Stage | What it reads | What it rejects |
 |---|---|---|
@@ -66,6 +77,7 @@ Every stage on that spine is a veto, and the vetoes compound. A hand that reads 
 | **Dynamics** | pinch confidence, closing rate of the other three fingers | the classic false pinch — a whole hand closing |
 | **Session gate** | activation gesture held 0.3 s, 2.0 s grace after loss | idle hands resting in view |
 | **Arbiter** | which lane held the hand last, neutral for 3 frames | a combo and a pointer gesture claiming the same frame |
+| **Joint pinch/aim** | trusted open pose, contraction history, confident closure, palm-transported tip and physical timing | isolated closures, finger-curl target drift, curl-only drag and incomplete episodes |
 | **Lanes** | 5 stable frames, DTW distance, 0.3 s dwell | sequences that never completed |
 | **Target resolution** | softmax over accessibility candidates, 0.55 floor, 24–60 px snap | ambiguous neighbours and unreachable targets |
 
@@ -87,12 +99,18 @@ Numbers are from `time.perf_counter` loops in this repository, not from a spec s
 Requires macOS 15+, Python 3.13, and a camera.
 
 ```bash
-git clone https://github.com/<you>/pinchcursor.git
-cd pinchcursor
+git clone https://github.com/CYK16688/PinchCursor.git
+cd PinchCursor
 python3.13 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python main.py
 ```
+
+Runtime state — `settings.json`, the optional event log and the single‑instance
+lock — lives in `~/Library/Application Support/PinchCursor/`, never inside the app
+bundle: writing there invalidates the signature of a signed bundle and loses the
+settings on the next build. A settings file found at the old in‑bundle location is
+moved across on first launch.
 
 Build a standalone `.app` (PyInstaller cannot cross‑compile, so run it on macOS):
 
@@ -101,13 +119,16 @@ Build a standalone `.app` (PyInstaller cannot cross‑compile, so run it on macO
 open "dist/PinchCursor.app"
 ```
 
-The script signs ad-hoc by default, which is fine for a one-off run but resets every TCC grant on the next rebuild: macOS keys an ad-hoc app's Accessibility and Input Monitoring permissions to the binary hash, so each build looks like a different app. Pass your signing identity once and the grants survive:
+The script auto-detects a `Developer ID Application` certificate in the keychain and signs with it. That matters more than it looks: a Developer ID signature pins the app's designated requirement to **bundle ID + Team ID**, so one round of Camera/Accessibility/Input Monitoring grants survives every later rebuild. Without a certificate it falls back to ad-hoc, whose designated requirement is the binary hash — each build then looks like a brand-new app, and macOS does something worse than prompting again: it keeps the old switches switched **on** in System Settings while denying the running app, which is very hard to diagnose from the UI.
 
 ```bash
-CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./scripts/build_macos_app.sh
+./scripts/build_macos_app.sh                                     # auto-detects
+CODESIGN_IDENTITY="Developer ID Application: ..." ./scripts/...   # explicit
 ```
 
-Either way the app needs three grants, in **System Settings → Privacy & Security**: Camera, Accessibility (move the pointer, post clicks) and Input Monitoring (read the hold-to-activate shortcut). Accessibility and Input Monitoring only take effect after the app is quit and reopened.
+Either way the app needs three grants, in **System Settings → Privacy & Security**: Camera, Accessibility (move the pointer, post clicks) and Input Monitoring (read the hold-to-activate shortcut). Accessibility and Input Monitoring only take effect after the app is quit and reopened. If a grant was made before a rebuild that changed the signature, reset the stale record instead of re-toggling it — the switch will keep lying until you do: `tccutil reset Accessibility com.cyk16688.pinchcursor` (and `Camera`).
+
+The build ends with a release gate that fails the build rather than shipping a broken bundle: it refuses to finish if any runtime state (`settings.json`, the event log, a lock file) was collected inside `Contents/`, or if `codesign --verify --strict` no longer passes. Either condition means the next launch is refused by Gatekeeper and every TCC grant keyed to the signature is lost.
 
 ### Permissions
 
@@ -184,7 +205,7 @@ The same two figures appear in Settings → Advanced → Statistics, so you can 
 
 ```bash
 env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
-# 707 passed
+# 1353 passed
 ```
 
 The suite covers the native adapters with fake bindings, the decision layers with synthetic landmarks, the QSS wiring, and the packaging contracts. macOS input itself is exercised by hand — see `docs/VALIDATION.md`.
@@ -192,7 +213,17 @@ The suite covers the native adapters with fake bindings, the decision layers wit
 ## Status & limits
 
 - **macOS is the supported platform.** A Windows adapter exists behind the same contracts but has only been tested with fake bindings; treat it as experimental.
-- **It is a second input device, not a mouse replacement.** 60–120 ms end‑to‑end latency and monocular tracking are fine for pointing at large targets, presenting, or working without touching the machine — not for pixel‑level design work.
+- **Stable mouse replacement is the goal; real-use acceptance is pending.**
+  Complete landmark replays now cover clicks, double clicks, moving drags and
+  releases at 15/30/60 FPS, continuous scrolling against coordinate-dependent
+  targets, tracking loss and stale frames. These tests use fake native input.
+  Joint click/aim replays compare against an independent open-finger trajectory,
+  including sudden/gradual closing while moving, screen edges, relative mapping,
+  rejected-episode recovery and camera geometry changes.
+  Synthetic precision tests cover sustained one-point corrections and reaching
+  screen edges, but do not establish real-camera accuracy or comfort. End-to-end
+  latency, small-target selection, text selection and prolonged use still need
+  comparison against a physical mouse. Inference timing alone is not input latency.
 - **Accessibility coverage varies.** Native controls expose geometry; Electron and web content often do not, so aiming assist simply does not engage there.
 - **The learned ranker is new.** It trains on your own usage; until you have a few hundred labelled locks, the Bayesian scorer is the better answer.
 

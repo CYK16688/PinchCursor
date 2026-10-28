@@ -24,7 +24,53 @@ from core.mediapipe_worker import MediaPipeVideoWorker
 from utils.camera_utils import open_camera
 from utils.locale import DEFAULT_LOCALE, SUPPORTED_LOCALES, normalize_locale
 from gui.i18n import tr, translate
+from gui.controls import SegmentedControl, ToggleSwitch
 from gui.theme import use_styled_background
+
+
+
+def styled_form(parent=None):
+    """A QFormLayout with the dialog's shared alignment.
+
+    Labels in this dialog are Chinese or English phrases of very different
+    lengths, so without an explicit column policy every row's field started at a
+    different x — the ragged left edge was the most visible flaw on the page.
+    Right-aligning the label column and pinning its width keeps the controls on
+    one vertical line in both languages.
+    """
+    form = QFormLayout(parent)
+    form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
+    form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+    form.setHorizontalSpacing(16)
+    form.setVerticalSpacing(10)
+    return form
+
+def slider_row(form, label, slider, value_text):
+    """Add a slider to a form with a live numeric readout beside it.
+
+    A bare QSlider gives no way to read or set an exact value: the handle's
+    position is the only information, and "smoothing" here is 0.001-0.02 stored
+    as slider/1000, so the number is not guessable at all.
+    """
+    holder = QWidget()
+    row = QHBoxLayout(holder)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(12)
+    row.addWidget(slider, 1)
+    readout = QLabel()
+    readout.setObjectName("sliderValue")
+    readout.setMinimumWidth(64)
+    readout.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    row.addWidget(readout)
+
+    def _refresh(*_args):
+        readout.setText(value_text(slider.value()))
+
+    slider.valueChanged.connect(_refresh)
+    _refresh()
+    form.addRow(label, holder)
+    return readout
 
 
 class SettingsDialog(QDialog):
@@ -58,6 +104,8 @@ class SettingsDialog(QDialog):
         self.current_section_id = "control"
         session = self.config.get("control_session") or {}
         self._staged_static_templates = deepcopy(session.get("custom_static_templates") or [])
+        # A pinch calibration measured in this dialog, applied only by Save.
+        self._staged_calibration = None
         self.init_ui()
 
     _GESTURE_LABEL_KEYS = {
@@ -263,6 +311,10 @@ class SettingsDialog(QDialog):
 
     def open_section(self, section_id):
         """Select a Precision Desk settings page by its stable identifier."""
+        control_tab = {"control": 0, "pointer": 0, "activation": 1}.get(section_id)
+        if control_tab is not None:
+            section_id = "control"
+            self.control_tabs.setCurrentIndex(control_tab)
         if section_id not in self.section_ids:
             raise ValueError(f"Unknown settings section: {section_id}")
         self.sidebar.setCurrentRow(self.section_ids.index(section_id))
@@ -289,6 +341,10 @@ class SettingsDialog(QDialog):
         self.control_title_label.setText(tr("settings.control.title"))
         self.control_description_label.setText(tr("settings.control.description"))
         self.activation_group.setTitle(tr("settings.control.activation"))
+        self.timing_group.setTitle(tr("settings.control.timing.title"))
+        self.assist_group.setTitle(tr("settings.control.assist.title"))
+        for index, key in enumerate(self._control_tab_keys):
+            self.control_tabs.setTabText(index, tr(key))
         selected_mode = self.session_mode.currentData()
         for mode, key in self._session_mode_keys.items():
             self.session_mode.setItemText(self.session_mode.findData(mode), tr(key))
@@ -325,6 +381,55 @@ class SettingsDialog(QDialog):
         self.custom_trigger_copy_label.setText(tr("settings.control.custom_trigger.description"))
         self.record_trigger_button.setText(tr("settings.control.custom_trigger.record"))
         self.custom_triggers_summary.setText(self._custom_trigger_summary())
+
+        # Pinch calibration copy.
+        self.calibrate_button.setText(tr("settings.control.calibrate.button"))
+        self._refresh_calibration_summary()
+
+        # Pointer / assist / mapping / performance. These were created with tr()
+        # but never revisited, so switching zh->en left them in the old language —
+        # the "half-translated dialog" the review reported.
+        self.pointer_group.setTitle(tr("settings.control.pointer.title"))
+        self.point_assist_label.setText(tr("settings.control.pointer.assist"))
+        self.point_assist_check.setText(tr("settings.control.pointer.assist"))
+        self.point_assist_hint.setText(tr("settings.control.pointer.assist_hint"))
+        self.assist_mode_label.setText(tr("settings.control.assist.mode"))
+        self.assist_mode_hint.setText(tr("settings.control.assist.mode_hint"))
+        for mode, key in (
+            ("bayesian", "settings.control.assist.bayesian"),
+            ("shadow", "settings.control.assist.shadow"),
+            ("ranker", "settings.control.assist.ranker"),
+        ):
+            index = self.assist_mode.findData(mode)
+            if index >= 0:
+                self.assist_mode.setItemText(index, tr(key))
+        self.mapping_mode_label.setText(tr("settings.control.mapping.mode"))
+        self.mapping_gain_label.setText(tr("settings.control.mapping.gain"))
+        self.mapping_hint.setText(tr("settings.control.mapping.hint"))
+        for mode, key in self._mapping_mode_keys.items():
+            index = self.mapping_mode.findData(mode)
+            if index >= 0:
+                self.mapping_mode.setItemText(index, tr(key))
+        self.performance_group.setTitle(tr("settings.control.performance.title"))
+        self.performance_label.setText(tr("settings.control.performance.mode"))
+        self.performance_hint.setText(tr("settings.control.performance.hint"))
+        for mode in ("standard", "performance"):
+            index = self.performance_mode.findData(mode)
+            if index >= 0:
+                # An explicit key map: interpolating a key here defeats every
+                # static catalogue audit and hides a typo until runtime.
+                self.performance_mode.setItemText(
+                    index, tr(self._PERFORMANCE_MODE_KEYS[mode])
+                )
+
+        # Telemetry. Context awareness and intent toggles are retranslated
+        # further down with the other advanced groups; this block sits outside
+        # them, which is why it was missed.
+        self.telemetry_group.setTitle(tr("settings.advanced.global.telemetry"))
+        self.telemetry_label.setText(tr("settings.advanced.global.telemetry_enabled"))
+        self.telemetry_check.setText(tr("settings.advanced.global.enable"))
+        self.telemetry_hint_label.setText(tr("settings.advanced.global.telemetry_description"))
+        self.purge_telemetry_button.setText(tr("settings.advanced.global.telemetry_purge"))
 
         self.permissions_title_label.setText(tr("settings.permissions.title"))
         self.permissions_group.setTitle(tr("settings.permissions.system_access"))
@@ -376,6 +481,8 @@ class SettingsDialog(QDialog):
         self.global_mouse_group.setTitle(tr("settings.advanced.global.mouse"))
         self.scroll_speed_label.setText(tr("settings.advanced.global.scroll_speed"))
         self.smoothing_label.setText(tr("settings.advanced.global.smoothing"))
+        self.dead_zone_label.setText(tr("settings.advanced.global.dead_zone"))
+        self.dead_zone_hint.setText(tr("settings.advanced.global.dead_zone_hint"))
         self.global_detection_group.setTitle(tr("settings.advanced.global.detection"))
         self.detection_conf_label.setText(tr("settings.advanced.global.confidence"))
         self.tracking_conf_label.setText(tr("settings.advanced.global.tracking_confidence"))
@@ -396,6 +503,7 @@ class SettingsDialog(QDialog):
         self.gesture_page.retranslate_ui()
         self.dynamic_gesture_page.retranslate_ui()
         self._refresh_control_mode_fields()
+        self._refresh_control_accessibility()
 
     def create_control_page(self):
         widget = QWidget()
@@ -406,16 +514,40 @@ class SettingsDialog(QDialog):
         self.control_description_label.setObjectName("hintLabel")
         self.control_description_label.setWordWrap(True)
         layout.addWidget(self.control_title_label)
-        layout.addWidget(self.control_description_label)
+        # The title and task tabs establish the page hierarchy without a
+        # second sentence repeating the navigation.
+        self.control_description_label.hide()
+        self.control_tabs = QTabWidget()
+        self._control_tab_keys = (
+            "settings.control.tab.pointer",
+            "settings.control.tab.activation",
+            "settings.control.tab.advanced",
+        )
+        self.pointer_page, pointer_layout = self._control_tab_page()
+        self.activation_page, activation_layout = self._control_tab_page()
+        self.control_advanced_page, advanced_layout = self._control_tab_page()
+        for page, key in zip(
+            (self.pointer_page, self.activation_page, self.control_advanced_page),
+            self._control_tab_keys,
+        ):
+            self.control_tabs.addTab(page, tr(key))
+        layout.addWidget(self.control_tabs, 1)
         self.activation_group = QGroupBox(tr("settings.control.activation"))
-        form = QFormLayout(self.activation_group)
+        form = styled_form(self.activation_group)
         session = self.config.get("control_session") or {}
-        self.session_mode = QComboBox()
+        # Four mutually exclusive activation modes. A segmented control keeps
+        # every option visible, so choosing is one click instead of two and the
+        # alternatives are discoverable without opening anything.
+        self.session_mode = SegmentedControl()
         self._session_mode_keys = {
             "gesture": "settings.control.mode.gesture",
             "hold_shortcut": "settings.control.mode.hold_shortcut",
             "gesture_or_shortcut": "settings.control.mode.gesture_or_shortcut",
             "always": "settings.control.mode.always",
+        }
+        self._PERFORMANCE_MODE_KEYS = {
+            "standard": "settings.control.performance.standard",
+            "performance": "settings.control.performance.performance",
         }
         for mode, key in self._session_mode_keys.items():
             self.session_mode.addItem(tr(key), mode)
@@ -452,7 +584,8 @@ class SettingsDialog(QDialog):
         self.no_hand_timeout_seconds.setSuffix(tr("common.unit.seconds"))
         self.no_hand_timeout_seconds.setValue(round(session.get("no_hand_timeout_seconds", 2.0)))
         self.mode_label = QLabel(tr("settings.control.mode"))
-        form.addRow(self.mode_label, self.session_mode)
+        form.addRow(self.mode_label)
+        form.addRow(self.session_mode)
         self.activation_gesture_label = QLabel(tr("settings.control.activation_gesture"))
         self.exit_gesture_label = QLabel(tr("settings.control.exit_gesture"))
         self.hold_shortcut_label = QLabel(tr("settings.control.hold_shortcut"))
@@ -461,25 +594,32 @@ class SettingsDialog(QDialog):
         form.addRow(self.activation_gesture_label, self.activation_gesture)
         form.addRow(self.exit_gesture_label, self.exit_gesture)
         form.addRow(self.hold_shortcut_label, self.hold_shortcut)
-        form.addRow(self.stability_seconds_label, self.stability_seconds)
         form.addRow(self.no_hand_timeout_seconds_label, self.no_hand_timeout_seconds)
+        self.timing_group = QGroupBox(tr("settings.control.timing.title"))
+        timing_form = styled_form(self.timing_group)
+        timing_form.addRow(self.stability_seconds_label, self.stability_seconds)
+        advanced_layout.addWidget(self.timing_group)
 
-        # Pinch calibration lives with the other recognition timings: it only
-        # changes how a gesture is measured, not what the pointer does.
+        # Calibration is a primary click task, alongside pointer tuning.
         self.calibrate_button = QPushButton(tr("settings.control.calibrate.button"))
         self.calibrate_button.clicked.connect(self.open_pinch_calibration)
         self.calibrate_hint = QLabel(tr("settings.control.calibrate.hint"))
         self.calibrate_hint.setObjectName("hintLabel")
         self.calibrate_hint.setWordWrap(True)
-        calibrate_row = QHBoxLayout()
-        calibrate_row.addWidget(self.calibrate_button)
-        calibrate_row.addStretch()
-        form.addRow(calibrate_row)
-        form.addRow("", self.calibrate_hint)
+        self.calibration_panel = QWidget()
+        calibration_layout = QVBoxLayout(self.calibration_panel)
+        calibration_layout.setContentsMargins(0, 0, 0, 0)
+        calibration_layout.setSpacing(8)
+        self.calibration_actions_layout = QHBoxLayout()
+        self.calibration_actions_layout.setSpacing(16)
+        self.calibration_actions_layout.addWidget(self.calibrate_button)
+        calibration_layout.addLayout(self.calibration_actions_layout)
+        calibration_layout.addWidget(self.calibrate_hint)
+        self.calibrate_hint.hide()
         form.addRow("", self.always_active_notice)
         self.session_mode.currentIndexChanged.connect(self._refresh_control_mode_fields)
         self._refresh_control_mode_fields()
-        layout.addWidget(self.activation_group)
+        activation_layout.addWidget(self.activation_group)
         self.custom_trigger_group = QGroupBox(tr("settings.control.custom_trigger.title"))
         template_layout = QVBoxLayout(self.custom_trigger_group)
         self.custom_trigger_copy_label = QLabel(tr("settings.control.custom_trigger.description"))
@@ -497,47 +637,51 @@ class SettingsDialog(QDialog):
         trigger_row.addWidget(self.record_trigger_button)
         trigger_row.addStretch()
         template_layout.addLayout(trigger_row)
-        layout.addWidget(self.custom_trigger_group)
+        advanced_layout.addWidget(self.custom_trigger_group)
 
         self.pointer_group = QGroupBox(tr("settings.control.pointer.title"))
-        pointer_form = QFormLayout(self.pointer_group)
+        pointer_form = styled_form(self.pointer_group)
         assist = self.config.get("pointer_assist") or {}
-        self.point_assist_check = QCheckBox(tr("settings.advanced.global.enable"))
+        self.point_assist_check = ToggleSwitch(tr("settings.control.pointer.assist"))
         self.point_assist_check.setChecked(bool(assist.get("enabled", True)))
         self.point_assist_hint = QLabel(tr("settings.control.pointer.assist_hint"))
         self.point_assist_hint.setObjectName("hintLabel")
         self.point_assist_hint.setWordWrap(True)
-        self.point_assist_label = QLabel(tr("settings.control.pointer.assist"))
-        pointer_form.addRow(self.point_assist_label, self.point_assist_check)
+        self.point_assist_label = QLabel()
+        self.point_assist_label.setVisible(False)
+        # The switch carries its own name; its explanation is a tooltip.
+        self.point_assist_hint.hide()
 
-        self.assist_mode = QComboBox()
+        self.assist_group = QGroupBox(tr("settings.control.assist.title"))
+        assist_form = styled_form(self.assist_group)
+        # Three short exclusive options: a segmented control shows all of them,
+        # so the user can see what the alternatives are without opening a popup.
+        self.assist_mode = SegmentedControl()
         for mode, key in (
             ("bayesian", "settings.control.assist.bayesian"),
             ("shadow", "settings.control.assist.shadow"),
             ("ranker", "settings.control.assist.ranker"),
         ):
             self.assist_mode.addItem(tr(key), mode)
-        self.assist_mode.setCurrentIndex(
-            max(self.assist_mode.findData(assist.get("mode", "bayesian")), 0)
-        )
+        self.assist_mode.setCurrentData(assist.get("mode", "bayesian"))
         self.assist_mode_label = QLabel(tr("settings.control.assist.mode"))
         self.assist_mode_hint = QLabel(tr("settings.control.assist.mode_hint"))
         self.assist_mode_hint.setObjectName("hintLabel")
         self.assist_mode_hint.setWordWrap(True)
-        pointer_form.addRow(self.assist_mode_label, self.assist_mode)
-        pointer_form.addRow("", self.assist_mode_hint)
-        pointer_form.addRow("", self.point_assist_hint)
+        assist_form.addRow(self.assist_mode_label)
+        assist_form.addRow(self.assist_mode)
+        assist_form.addRow(self.assist_mode_hint)
+        advanced_layout.insertWidget(1, self.assist_group)
 
         mapping = self.config.get("pointer_mapping") or {}
-        self.mapping_mode = QComboBox()
+        self.mapping_mode = SegmentedControl()
         self._mapping_mode_keys = {
             "absolute": "settings.control.mapping.absolute",
             "relative": "settings.control.mapping.relative",
         }
         for mode, key in self._mapping_mode_keys.items():
             self.mapping_mode.addItem(tr(key), mode)
-        mode_index = self.mapping_mode.findData(mapping.get("mode", "absolute"))
-        self.mapping_mode.setCurrentIndex(max(mode_index, 0))
+        self.mapping_mode.setCurrentData(mapping.get("mode", "absolute"))
         self.mapping_gain = QDoubleSpinBox()
         self.mapping_gain.setRange(1.0, 4.0)
         self.mapping_gain.setSingleStep(0.2)
@@ -549,20 +693,28 @@ class SettingsDialog(QDialog):
         self.mapping_hint = QLabel(tr("settings.control.mapping.hint"))
         self.mapping_hint.setObjectName("hintLabel")
         self.mapping_hint.setWordWrap(True)
-        pointer_form.addRow(self.mapping_mode_label, self.mapping_mode)
+        pointer_form.addRow(self.mapping_mode_label)
+        pointer_form.addRow(self.mapping_mode)
         pointer_form.addRow(self.mapping_gain_label, self.mapping_gain)
-        pointer_form.addRow("", self.mapping_hint)
+        self.calibration_actions_layout.insertWidget(0, self.point_assist_check)
+        self.calibration_actions_layout.insertStretch(1)
+        pointer_form.addRow(self.calibration_panel)
+        self.mapping_hint.hide()
         self.mapping_mode.currentIndexChanged.connect(self._refresh_mapping_fields)
         self._refresh_mapping_fields()
-        layout.addWidget(self.pointer_group)
+        pointer_layout.addWidget(self.pointer_group)
+        # Reparent the existing tuning card rather than creating duplicate
+        # controls: Save and Restore defaults still use the same widget values.
+        pointer_layout.addWidget(self.global_mouse_group)
+        self.dead_zone_hint.hide()
 
         performance = self.config.get("performance") or {}
         self.performance_group = QGroupBox(tr("settings.control.performance.title"))
-        performance_form = QFormLayout(self.performance_group)
-        self.performance_mode = QComboBox()
+        performance_form = styled_form(self.performance_group)
+        self.performance_mode = SegmentedControl()
         for mode in ("standard", "performance"):
             self.performance_mode.addItem(
-                tr(f"settings.control.performance.{mode}"), mode
+                tr(self._PERFORMANCE_MODE_KEYS[mode]), mode
             )
         self.performance_mode.setCurrentIndex(
             max(self.performance_mode.findData(performance.get("mode", "standard")), 0)
@@ -571,21 +723,61 @@ class SettingsDialog(QDialog):
         self.performance_hint = QLabel(tr("settings.control.performance.hint"))
         self.performance_hint.setObjectName("hintLabel")
         self.performance_hint.setWordWrap(True)
-        performance_form.addRow(self.performance_label, self.performance_mode)
-        performance_form.addRow("", self.performance_hint)
-        layout.addWidget(self.performance_group)
+        performance_form.addRow(self.performance_label)
+        performance_form.addRow(self.performance_mode)
+        performance_form.addRow(self.performance_hint)
+        advanced_layout.addWidget(self.performance_group)
+        for page_layout in (pointer_layout, activation_layout, advanced_layout):
+            page_layout.addStretch()
+        self._refresh_control_accessibility()
+        return widget
 
-        layout.addStretch()
-        # The page outgrew the viewport once it had four groups; without a
-        # scroll area Qt squeezes every row instead of letting the user scroll.
+    @staticmethod
+    def _control_tab_page():
+        """Keep each task independently scrollable at short window heights."""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(4, 12, 14, 16)
+        layout.setSpacing(12)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setWidget(widget)
-        return scroll
+        scroll.setWidget(page)
+        return scroll, layout
+
+    def _refresh_control_accessibility(self):
+        """Keep visible form labels and assistive names in sync across locales."""
+        for label, field in (
+            (self.mode_label, self.session_mode),
+            (self.activation_gesture_label, self.activation_gesture),
+            (self.exit_gesture_label, self.exit_gesture),
+            (self.hold_shortcut_label, self.hold_shortcut),
+            (self.stability_seconds_label, self.stability_seconds),
+            (self.no_hand_timeout_seconds_label, self.no_hand_timeout_seconds),
+            (self.mapping_mode_label, self.mapping_mode),
+            (self.mapping_gain_label, self.mapping_gain),
+            (self.assist_mode_label, self.assist_mode),
+            (self.performance_label, self.performance_mode),
+            (self.scroll_speed_label, self.scroll_speed),
+            (self.smoothing_label, self.smoothing),
+            (self.dead_zone_label, self.dead_zone),
+        ):
+            label.setBuddy(field)
+            field.setAccessibleName(label.text())
+        self.calibrate_button.setToolTip(tr("settings.control.calibrate.hint"))
+        self.point_assist_check.setAccessibleName(tr("settings.control.pointer.assist"))
+        self.point_assist_check.setToolTip(tr("settings.control.pointer.assist_hint"))
+        self.mapping_mode.setToolTip(tr("settings.control.mapping.hint"))
+        self.dead_zone.setToolTip(tr("settings.advanced.global.dead_zone_hint"))
 
     def open_pinch_calibration(self):
-        """Run the guided pinch calibration and stage the resulting ratios."""
+        """Run the guided pinch calibration and stage the resulting ratios.
+
+        The result is held until Save like every other control in this dialog.
+        Writing straight into the shared config meant Cancel — or closing the
+        window — still left the new thresholds live, and the next save anywhere
+        in the session committed them.
+        """
         from .pinch_calibration_dialog import PinchCalibrationDialog
 
         dialog = PinchCalibrationDialog(
@@ -596,11 +788,41 @@ class SettingsDialog(QDialog):
         try:
             if dialog.exec() and dialog.calibration is not None:
                 result = dialog.calibration
-                self.config.set("pinch_calibration", "enter_ratio", round(float(result.enter_ratio), 4))
-                self.config.set("pinch_calibration", "exit_ratio", round(float(result.exit_ratio), 4))
-                self.config.set("pinch_calibration", "sample_count", int(result.sample_count))
+                self._staged_calibration = {
+                    "enter_ratio": round(float(result.enter_ratio), 4),
+                    "exit_ratio": round(float(result.exit_ratio), 4),
+                    "sample_count": int(result.sample_count),
+                }
+                self._refresh_calibration_summary()
         finally:
             dialog.deleteLater()
+
+    def _apply_calibration_stage(self):
+        """Commit a pending calibration only at the Save boundary."""
+        staged = getattr(self, "_staged_calibration", None)
+        if not staged:
+            return
+        for key, value in staged.items():
+            self.config.set("pinch_calibration", key, value)
+        self._staged_calibration = None
+
+    def _refresh_calibration_summary(self):
+        """Show the staged thresholds so the user can see what Save will apply."""
+        label = getattr(self, "calibrate_hint", None)
+        if label is None:
+            return
+        staged = getattr(self, "_staged_calibration", None)
+        if not staged:
+            label.setText(tr("settings.control.calibrate.hint"))
+            label.hide()
+            return
+        label.show()
+        label.setText(tr(
+            "settings.control.calibrate.pending",
+            enter=staged["enter_ratio"],
+            exit=staged["exit_ratio"],
+            count=staged["sample_count"],
+        ))
 
     def _refresh_mapping_fields(self):
         """Gain only applies to relative mapping; keep it visible but inert."""
@@ -619,6 +841,7 @@ class SettingsDialog(QDialog):
         ):
             label.setVisible(uses_gesture)
             field.setVisible(uses_gesture)
+        self.timing_group.setVisible(uses_gesture)
         self.hold_shortcut_label.setVisible(uses_shortcut)
         self.hold_shortcut.setVisible(uses_shortcut)
         self.exit_gesture_label.setVisible(mode != "always")
@@ -757,20 +980,6 @@ class SettingsDialog(QDialog):
         worker.start()
         return worker
 
-    @staticmethod
-    def _placeholder_page(title, description):
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        heading = QLabel(title)
-        heading.setObjectName("settingsPageTitle")
-        copy = QLabel(description)
-        copy.setObjectName("hintLabel")
-        copy.setWordWrap(True)
-        layout.addWidget(heading)
-        layout.addWidget(copy)
-        layout.addStretch()
-        return widget
-
     def create_permissions_page(self):
         permissions = create_platform_services().permission_provider.snapshot()
         widget = QWidget()
@@ -779,7 +988,7 @@ class SettingsDialog(QDialog):
         self.permissions_title_label.setObjectName("settingsPageTitle")
         layout.addWidget(self.permissions_title_label)
         self.permissions_group = QGroupBox(tr("settings.permissions.system_access"))
-        form = QFormLayout(self.permissions_group)
+        form = styled_form(self.permissions_group)
         self.permissions_camera_label = QLabel(tr("settings.permissions.camera"))
         self.permissions_accessibility_label = QLabel(tr("settings.permissions.accessibility"))
         self.permissions_input_monitoring_label = QLabel(tr("settings.permissions.input_monitoring"))
@@ -1105,82 +1314,103 @@ class SettingsDialog(QDialog):
         """创建全局设置标签页"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
+        # Cards must not run into the scrollbar or the tab frame.
+        layout.setContentsMargins(4, 12, 14, 16)
+        layout.setSpacing(4)
 
         self.global_mouse_group = QGroupBox(tr("settings.advanced.global.mouse"))
-        form1 = QFormLayout(self.global_mouse_group)
+        form1 = styled_form(self.global_mouse_group)
 
         self.scroll_speed = QSlider(Qt.Horizontal)
         self.scroll_speed.setRange(10, 100)
         self.scroll_speed_label = QLabel(tr("settings.advanced.global.scroll_speed"))
-        form1.addRow(self.scroll_speed_label, self.scroll_speed)
+        slider_row(form1, self.scroll_speed_label, self.scroll_speed, lambda v: f"{v}")
 
         self.smoothing = QSlider(Qt.Horizontal)
         self.smoothing.setRange(1, 20)
         self.smoothing_label = QLabel(tr("settings.advanced.global.smoothing"))
-        form1.addRow(self.smoothing_label, self.smoothing)
+        # Stored as value()/1000, so show the real unit rather than the tick.
+        slider_row(form1, self.smoothing_label, self.smoothing, lambda v: f"{v / 1000:.3f}")
+
+        # The dial that actually stops the cursor shaking. 0 turns it off, which
+        # is the right answer for drawing but not for pointing at buttons.
+        self.dead_zone = QSlider(Qt.Horizontal)
+        self.dead_zone.setRange(0, 16)
+        self.dead_zone_label = QLabel(tr("settings.advanced.global.dead_zone"))
+        self.dead_zone_hint = QLabel(tr("settings.advanced.global.dead_zone_hint"))
+        self.dead_zone_hint.setObjectName("hintLabel")
+        self.dead_zone_hint.setWordWrap(True)
+        slider_row(
+            form1, self.dead_zone_label, self.dead_zone,
+            lambda v: tr("settings.advanced.global.dead_zone_off") if v == 0 else f"{v} px",
+        )
+        form1.addRow("", self.dead_zone_hint)
 
         layout.addWidget(self.global_mouse_group)
 
         self.global_detection_group = QGroupBox(tr("settings.advanced.global.detection"))
-        form2 = QFormLayout(self.global_detection_group)
+        form2 = styled_form(self.global_detection_group)
 
         self.detection_conf = QSlider(Qt.Horizontal)
         self.detection_conf.setRange(30, 95)
         self.detection_conf_label = QLabel(tr("settings.advanced.global.confidence"))
-        form2.addRow(self.detection_conf_label, self.detection_conf)
+        slider_row(form2, self.detection_conf_label, self.detection_conf, lambda v: f"{v}{tr('common.unit.percent')}")
 
         self.tracking_conf = QSlider(Qt.Horizontal)
         self.tracking_conf.setRange(30, 95)
         self.tracking_conf_label = QLabel(tr("settings.advanced.global.tracking_confidence"))
-        form2.addRow(self.tracking_conf_label, self.tracking_conf)
+        slider_row(form2, self.tracking_conf_label, self.tracking_conf, lambda v: f"{v}{tr('common.unit.percent')}")
 
         layout.addWidget(self.global_detection_group)
 
         self.global_stabilization_group = QGroupBox(tr("settings.advanced.global.stabilization"))
-        form3 = QFormLayout(self.global_stabilization_group)
+        form3 = styled_form(self.global_stabilization_group)
 
         self.confirm_threshold = QSlider(Qt.Horizontal)
         self.confirm_threshold.setRange(1, 5)
         self.confirm_threshold_label = QLabel(tr("settings.advanced.global.confirm_frames"))
-        form3.addRow(self.confirm_threshold_label, self.confirm_threshold)
+        slider_row(form3, self.confirm_threshold_label, self.confirm_threshold, lambda v: f"{v}{tr('common.unit.frames')}")
 
         self.min_switch_interval = QSlider(Qt.Horizontal)
         self.min_switch_interval.setRange(5, 30)
         self.min_switch_interval_label = QLabel(tr("settings.advanced.global.switch_interval"))
-        form3.addRow(self.min_switch_interval_label, self.min_switch_interval)
+        slider_row(form3, self.min_switch_interval_label, self.min_switch_interval, lambda v: f"{v * 10} ms")
 
         layout.addWidget(self.global_stabilization_group)
 
         self.global_context_group = QGroupBox(tr("settings.advanced.global.context"))
-        form4 = QFormLayout(self.global_context_group)
+        form4 = styled_form(self.global_context_group)
 
-        self.context_aware_check = QCheckBox(tr("settings.advanced.global.enable"))
+        self.context_aware_check = ToggleSwitch(tr("settings.advanced.global.context_aware"))
+        self.context_aware_label = QLabel()
+        self.context_aware_label.setVisible(False)
         self.global_context_hint_label = QLabel(tr("settings.advanced.global.context_description"))
         self.global_context_hint_label.setObjectName("hintLabel")
         self.global_context_hint_label.setWordWrap(True)
-        self.context_aware_label = QLabel(tr("settings.advanced.global.context_aware"))
-        form4.addRow(self.context_aware_label, self.context_aware_check)
+        form4.addRow(self.context_aware_check)
         form4.addRow("", self.global_context_hint_label)
-        self.intent_actions_check = QCheckBox(tr("settings.advanced.global.intent_enabled"))
+        self.intent_actions_check = ToggleSwitch(tr("settings.advanced.global.intent_enabled"))
+        self.intent_actions_label = QLabel()
+        self.intent_actions_label.setVisible(False)
         self.intent_hint_label = QLabel(tr("settings.advanced.global.intent_description"))
         self.intent_hint_label.setObjectName("hintLabel")
         self.intent_hint_label.setWordWrap(True)
-        self.intent_actions_label = QLabel(tr("settings.advanced.global.intent"))
-        form4.addRow(self.intent_actions_label, self.intent_actions_check)
+        form4.addRow(self.intent_actions_check)
         form4.addRow("", self.intent_hint_label)
 
         layout.addWidget(self.global_context_group)
 
         self.telemetry_group = QGroupBox(tr("settings.advanced.global.telemetry"))
-        telemetry_form = QFormLayout(self.telemetry_group)
-        self.telemetry_check = QCheckBox(tr("settings.advanced.global.enable"))
-        self.telemetry_label = QLabel(tr("settings.advanced.global.telemetry_enabled"))
+        telemetry_form = styled_form(self.telemetry_group)
+        self.telemetry_check = ToggleSwitch(tr("settings.advanced.global.telemetry_enabled"))
+        self.telemetry_label = QLabel()
+        self.telemetry_label.setVisible(False)
         self.telemetry_hint_label = QLabel(tr("settings.advanced.global.telemetry_description"))
         self.telemetry_hint_label.setObjectName("hintLabel")
         self.telemetry_hint_label.setWordWrap(True)
         self.purge_telemetry_button = QPushButton(tr("settings.advanced.global.telemetry_purge"))
         self.purge_telemetry_button.clicked.connect(self._purge_telemetry)
-        telemetry_form.addRow(self.telemetry_label, self.telemetry_check)
+        telemetry_form.addRow(self.telemetry_check)
         telemetry_form.addRow("", self.telemetry_hint_label)
         # What the adaptor currently believes, read straight from the config it
         # wrote — the same numbers the TargetModel was built with.
@@ -1270,16 +1500,17 @@ class SettingsDialog(QDialog):
         """Load only settings backed by the current MediaPipe control path."""
         sensitivity = self.config.get("global_sensitivity") or {}
         self.scroll_speed.setValue(sensitivity.get("scroll_speed", 50))
-        self.smoothing.setValue(int(sensitivity.get("smoothing", 0.005) * 1000))
+        self.smoothing.setValue(round(float(sensitivity.get("smoothing", 0.005)) * 1000))
+        self.dead_zone.setValue(int(float(sensitivity.get("dead_zone", 8.0))))
 
         detection = self.config.get("detection") or {}
-        self.detection_conf.setValue(int(detection.get("confidence", 0.7) * 100))
-        self.tracking_conf.setValue(int(detection.get("tracking_confidence", 0.5) * 100))
+        self.detection_conf.setValue(round(float(detection.get("confidence", 0.7)) * 100))
+        self.tracking_conf.setValue(round(float(detection.get("tracking_confidence", 0.5)) * 100))
 
         # 稳定化参数
         stab = self.config.get("stabilization") or {}
         self.confirm_threshold.setValue(stab.get("confirm_threshold", 2))
-        self.min_switch_interval.setValue(int(stab.get("min_switch_interval", 0.1) * 100))
+        self.min_switch_interval.setValue(round(float(stab.get("min_switch_interval", 0.1)) * 100))
 
         # 上下文感知
         telemetry = self.config.get("telemetry") or {}
@@ -1308,18 +1539,22 @@ class SettingsDialog(QDialog):
         layout = QHBoxLayout(frame)
 
         # 位置输入
+        # Coordinates are global screen points, and a display placed left of or
+        # above the main one has a negative origin. Clamping to 0 moved such a
+        # zone onto the primary display the moment the page was opened, and the
+        # next Save persisted the moved copy.
         x_spin = QSpinBox()
-        x_spin.setRange(0, 9999)
-        x_spin.setValue(rule.get('x', 0))
+        x_spin.setRange(-32768, 32767)
+        x_spin.setValue(int(rule.get('x', 0)))
         y_spin = QSpinBox()
-        y_spin.setRange(0, 9999)
-        y_spin.setValue(rule.get('y', 0))
+        y_spin.setRange(-32768, 32767)
+        y_spin.setValue(int(rule.get('y', 0)))
         w_spin = QSpinBox()
-        w_spin.setRange(1, 9999)
-        w_spin.setValue(rule.get('w', 100))
+        w_spin.setRange(1, 32767)
+        w_spin.setValue(int(rule.get('w', 100)))
         h_spin = QSpinBox()
-        h_spin.setRange(1, 9999)
-        h_spin.setValue(rule.get('h', 100))
+        h_spin.setRange(1, 32767)
+        h_spin.setValue(int(rule.get('h', 100)))
 
         x_label = QLabel(tr("settings.advanced.zones.x"))
         y_label = QLabel(tr("settings.advanced.zones.y"))
@@ -1397,12 +1632,21 @@ class SettingsDialog(QDialog):
 
     def save_settings(self):
         """保存设置"""
+        # A combination carrying an unusable shortcut used to be dropped by the
+        # normalizer, so saving silently deleted work the user had just done.
+        # Refuse the save and point at the card instead.
+        for card in self.combo_cards:
+            if not card.hotkey_is_valid():
+                card.refresh_hotkey_validity()
+                card.setFocus()
+                return
         # Locale selection remains staged until this explicit Save action.
         self.config.set("ui", "language", self.language_combo.currentData())
 
         # Global controls backed by the live pointer path.
         self.config.set("global_sensitivity", "scroll_speed", self.scroll_speed.value())
         self.config.set("global_sensitivity", "smoothing", self.smoothing.value() / 1000)
+        self.config.set("global_sensitivity", "dead_zone", float(self.dead_zone.value()))
 
         # MediaPipe is the sole supported landmark provider.
         self.config.set("detection", "detector_type", "mediapipe")
@@ -1466,6 +1710,9 @@ class SettingsDialog(QDialog):
         self.gesture_page.apply_to_config(self.config)
         self.dynamic_gesture_page.apply_to_config()
 
+        # A calibration measured during this dialog is committed only here.
+        self._apply_calibration_stage()
+
         # Persist normalized shortcut combinations now, rather than leaving
         # malformed legacy entries alive until a later ConfigManager.save().
         from utils.config_manager import normalize_gesture_combos
@@ -1511,13 +1758,14 @@ class SettingsDialog(QDialog):
         )
         sens = DEFAULT_CONFIG.get("global_sensitivity", {})
         self.scroll_speed.setValue(sens.get("scroll_speed", 50))
-        self.smoothing.setValue(int(sens.get("smoothing", 0.005) * 1000))
+        self.smoothing.setValue(round(float(sens.get("smoothing", 0.005)) * 1000))
+        self.dead_zone.setValue(int(float(sens.get("dead_zone", 8.0))))
         detection = DEFAULT_CONFIG.get("detection", {})
-        self.detection_conf.setValue(int(detection.get("confidence", 0.7) * 100))
-        self.tracking_conf.setValue(int(detection.get("tracking_confidence", 0.5) * 100))
+        self.detection_conf.setValue(round(float(detection.get("confidence", 0.7)) * 100))
+        self.tracking_conf.setValue(round(float(detection.get("tracking_confidence", 0.5)) * 100))
         stabilization = DEFAULT_CONFIG.get("stabilization", {})
         self.confirm_threshold.setValue(stabilization.get("confirm_threshold", 2))
-        self.min_switch_interval.setValue(int(stabilization.get("min_switch_interval", 0.1) * 100))
+        self.min_switch_interval.setValue(round(float(stabilization.get("min_switch_interval", 0.1)) * 100))
 
         telemetry = DEFAULT_CONFIG.get("telemetry", {})
         self.telemetry_check.setChecked(telemetry.get("enabled", False) is True)

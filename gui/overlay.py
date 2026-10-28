@@ -17,7 +17,6 @@ class GestureOverlay(QWidget):
         HudState.CLICKED: "hud.clicked",
         HudState.DRAGGING: "hud.dragging",
         HudState.SECONDARY_CLICK: "hud.secondary_click",
-        HudState.VOLUME: "hud.volume",
         HudState.CONTEXTUAL: "hud.contextual",
         HudState.ERROR: "hud.error",
     }
@@ -27,7 +26,6 @@ class GestureOverlay(QWidget):
         HudState.CLICKED: QColor("#47D7A1"),
         HudState.DRAGGING: QColor("#5E8CFF"),
         HudState.SECONDARY_CLICK: QColor("#B98CFF"),
-        HudState.VOLUME: QColor("#5E8CFF"),
         HudState.CONTEXTUAL: QColor("#5E8CFF"),
         HudState.ERROR: QColor("#FF6B6B"),
     }
@@ -37,7 +35,6 @@ class GestureOverlay(QWidget):
         HudState.CLICKED: "pinch",
         HudState.DRAGGING: "grab",
         HudState.SECONDARY_CLICK: "peace",
-        HudState.VOLUME: "thumb_volume",
     }
 
     def __init__(self, parent=None):

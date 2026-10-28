@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from math import isfinite
+from numbers import Real
 from typing import Protocol
 
 
@@ -82,6 +84,19 @@ class PlatformCapabilities:
     camera_permission_promptable: bool = True
 
 
+def normalize_cursor_position(position: object) -> tuple[float, float] | None:
+    """Accept only a finite numeric pair at the native pointer boundary."""
+    if not isinstance(position, (tuple, list)) or len(position) != 2:
+        return None
+    if any(isinstance(value, bool) or not isinstance(value, Real) for value in position):
+        return None
+    try:
+        x, y = float(position[0]), float(position[1])
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return (x, y) if isfinite(x) and isfinite(y) else None
+
+
 class SystemInputController(Protocol):
     @property
     def supported_actions(self) -> frozenset[str]: ...
@@ -89,6 +104,10 @@ class SystemInputController(Protocol):
     def execute(self, request: ActionRequest) -> ActionResult: ...
 
     def release_drag(self) -> ActionResult: ...
+
+    def cursor_position(self) -> tuple[float, float] | None:
+        """Read the actual OS pointer without moving it; None if unavailable."""
+        ...
 
 
 class UIContextProvider(Protocol):

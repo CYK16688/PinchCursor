@@ -62,7 +62,10 @@ def apply_dark_palette(app) -> None:
     surface = QColor("#121419")
     elevated = QColor("#1A1D24")
     text = QColor("#F5F7FA")
+    # Disabled ink only: #5C636F is a deliberate "inactive" signal and WCAG
+    # exempts inactive controls. Anything the user has to READ uses readable.
     muted = QColor("#5C636F")
+    readable = QColor("#969DAA")
     accent = QColor("#5E8CFF")
 
     palette.setColor(QPalette.Window, canvas)
@@ -75,7 +78,7 @@ def apply_dark_palette(app) -> None:
     palette.setColor(QPalette.BrightText, QColor("#FFFFFF"))
     palette.setColor(QPalette.ToolTipBase, elevated)
     palette.setColor(QPalette.ToolTipText, text)
-    palette.setColor(QPalette.PlaceholderText, muted)
+    palette.setColor(QPalette.PlaceholderText, readable)
     palette.setColor(QPalette.Highlight, accent)
     palette.setColor(QPalette.HighlightedText, QColor("#FFFFFF"))
     palette.setColor(QPalette.Link, accent)
@@ -153,6 +156,12 @@ QLabel#sectionTitle {
 QLabel#hintLabel, QLabel#comboLabel {
     color: #8B93A1;
 }
+/* Inline validation: a rejected value has to read as a problem where it is
+   typed, not as another grey hint the eye skips past. */
+QLabel#fieldError {
+    color: #FF8F8F;
+    font-size: 12px;
+}
 QLabel#comboPlus, QLabel#comboArrow {
     color: #5E8CFF;
     font-weight: 600;
@@ -161,6 +170,38 @@ QLabel#gestureName {
     color: #F5F7FA;
     font-size: 15px;
     font-weight: 600;
+}
+/* An unchecked gesture is inert; saying so with colour beats leaving it
+   looking as live as the rows above it. */
+QLabel#gestureName[muted="true"] {
+    color: #8B93A1;
+}
+/* The row's disclosure chevron: no chrome, hover only. */
+QPushButton#rowDisclosure {
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+QPushButton#rowDisclosure:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+}
+/* A core pointer gesture is a fixed contract, not an editable row: recessed
+   fill and no hover makes that legible without adding a disabled control. */
+QFrame#gestureCoreRow {
+    background: rgba(255, 255, 255, 0.028);
+    border: 1px dashed rgba(255, 255, 255, 0.09);
+    border-radius: 12px;
+}
+QLabel#gestureContractAction {
+    color: #E4E8EF;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+/* Gesture rows are clickable, so they need the hover/pressed states of one. */
+QFrame#gestureSettingsRow:hover {
+    border-color: rgba(255, 255, 255, 0.16);
 }
 QLabel#hudLabel {
     color: #F5F7FA;
@@ -172,8 +213,103 @@ QLabel#hudLabel {
    than to a wrong semantic colour. Every value the models emit has a rule. */
 QLabel#sessionState {
     color: #8B93A1;
-    font-size: 18px;
+    font-size: 17px;
     font-weight: 600;
+}
+/* Numeric readout beside an advanced slider. */
+QLabel#sliderValue {
+    color: #C6CBD5;
+    font-size: 12px;
+}
+/* One sentence under the state: what to do next, not what state it is in. */
+QLabel#sessionHint {
+    color: #8B93A1;
+    font-size: 12px;
+}
+/* The state dot replaces a literal "\u25cf " glued into the label text. */
+QLabel#stateDot {
+    background: #5C636F;
+    border-radius: 4px;
+}
+QLabel#stateDot[semantic="granted"] {
+    background: #47D7A1;
+}
+QLabel#stateDot[semantic="pending"] {
+    background: #F5B942;
+}
+QLabel#stateDot[semantic="denied"] {
+    background: #FF6B6B;
+}
+QLabel#stateDot[semantic="idle"] {
+    background: #4A515E;
+}
+
+/* ── gesture reference: the one thing the console could not teach ────────── */
+QFrame#gestureReference {
+    background: #121419;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+}
+QFrame#gestureGuideTile {
+    background: #1A1D24;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 10px;
+}
+QLabel#guideAction { color: #F5F7FA; font-size: 13px; font-weight: 600; }
+QLabel#guidePose { color: #C6CBD5; font-size: 12px; }
+QFrame#interactionPanel {
+    background: #1A1D24;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+}
+QFrame#setupCard {
+    background: #121419;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px;
+}
+QFrame#interactionPanel[semantic="armed"] { border-color: #5E8CFF; }
+QFrame#interactionPanel[semantic="danger"] { border-color: #FF6B6B; }
+QFrame#interactionPanel[semantic="warning"] { border-color: #F5B942; }
+QLabel#interactionTitle { color: #F5F7FA; font-size: 18px; font-weight: 600; }
+QLabel#interactionTitle[semantic="armed"] { color: #AFC5FF; }
+QLabel#interactionTitle[semantic="active"], QLabel#interactionTitle[semantic="success"] { color: #47D7A1; }
+QLabel#interactionTitle[semantic="danger"] { color: #FF8F8F; }
+QLabel#interactionTitle[semantic="warning"] { color: #F5B942; }
+QLabel#interactionHint { color: #C6CBD5; font-size: 12px; }
+QLabel#interactionStep {
+    color: #969DAA;
+    background: #121419;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 6px;
+    padding: 5px 6px;
+    font-size: 12px;
+}
+QLabel#interactionStep[current="true"] {
+    color: #F5F7FA;
+    background: #3658B6;
+    border-color: #5E8CFF;
+    font-weight: 600;
+}
+QLabel#gestureReferenceHint {
+    color: #7C8494;
+    font-size: 11px;
+}
+QLabel#gestureRefName {
+    color: #E4E8EF;
+    font-size: 13px;
+}
+QLabel#gestureRefArrow {
+    color: #5A6172;
+    font-size: 12px;
+}
+QLabel#gestureRefAction {
+    color: #969DAA;
+    font-size: 12px;
+}
+QFrame#permissionBlock {
+    background: transparent;
+    border: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 QLabel#sessionState[semantic="active"],
 QLabel#sessionState[semantic="ready"] {
@@ -192,7 +328,8 @@ QLabel#sessionState[semantic="danger"] {
     color: #FF6B6B;
 }
 QLabel#lastActionValue {
-    color: #5C636F;
+    /* Content, not chrome: #5C636F on a surface card is only 3.04:1. */
+    color: #969DAA;
     font-size: 13px;
 }
 QLabel#lastActionValue[semantic="recent"] {
@@ -283,9 +420,14 @@ QLabel#previewStatus {
     font-size: 12px;
 }
 QLabel#placeholderTitle {
-    color: #8B93A1;
-    font-size: 14px;
+    color: #C6CBD5;
+    font-size: 15px;
     font-weight: 500;
+}
+/* The three steps that turn an empty well into a working console. */
+QLabel#placeholderSteps {
+    color: #7C8494;
+    font-size: 12px;
 }
 QFrame#hairline {
     background: rgba(255, 255, 255, 0.08);
@@ -349,21 +491,31 @@ QPushButton#quietButton:hover {
 }
 /* A summary row is the control that changes it: hover is the affordance, and
    the trailing chevron says "opens somewhere". No "Change" word needed. */
-QFrame#summaryRow {
+QPushButton#summaryRow {
     background: transparent;
     border: 1px solid transparent;
     border-radius: 12px;
 }
-QFrame#summaryRow:hover {
-    background: rgba(255, 255, 255, 0.045);
-    border-color: rgba(255, 255, 255, 0.07);
+QPushButton#summaryRow:hover {
+    /* 4.5% was indistinguishable from the card behind it: the row is a control
+       and has to look like one before it is clicked. */
+    background: rgba(255, 255, 255, 0.075);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+QPushButton#summaryRow:focus {
+    border-color: #5E8CFF;
+}
+QPushButton#summaryRow:pressed {
+    background: rgba(255, 255, 255, 0.11);
 }
 QFrame#lastActionBlock {
     background: transparent;
     border: none;
 }
 QPushButton#primaryControlButton {
-    background: #5E8CFF;
+    /* White ink on the accent needs a darker fill: #5E8CFF only reaches 3.15:1
+       and its hover tint 2.68:1. #3457B5 keeps the same hue at 6.61:1. */
+    background: #3457B5;
     border: none;
     color: #FFFFFF;
     font-size: 14px;
@@ -371,10 +523,10 @@ QPushButton#primaryControlButton {
     padding: 14px 18px;
 }
 QPushButton#primaryControlButton:hover {
-    background: #729BFF;
+    background: #3F6AE0;
 }
 QPushButton#primaryControlButton:pressed {
-    background: #4C79E8;
+    background: #2D4A9E;
 }
 QPushButton#primaryControlButton:focus {
     border: 2px solid rgba(255, 255, 255, 0.85);
@@ -388,7 +540,7 @@ QPushButton#primaryControlButton[semantic="danger"] {
     color: #280C0C;
 }
 QPushButton#saveBtn {
-    background: #5E8CFF;
+    background: #3457B5;
     border: none;
     color: #FFFFFF;
 }
@@ -530,6 +682,48 @@ QCheckBox:hover {
 QCheckBox:disabled {
     color: #5C636F;
 }
+/* ── segmented control: a short exclusive choice with every option visible ── */
+QPushButton#segmentButton {
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    color: #C6CBD5;
+    font-size: 12px;
+    padding: 7px 14px;
+    border-radius: 0;
+}
+QPushButton#segmentButton[position="first"] {
+    border-top-left-radius: 9px;
+    border-bottom-left-radius: 9px;
+}
+QPushButton#segmentButton[position="last"] {
+    border-top-right-radius: 9px;
+    border-bottom-right-radius: 9px;
+}
+QPushButton#segmentButton[position="only"] {
+    border-radius: 9px;
+}
+QPushButton#segmentButton[position="middle"],
+QPushButton#segmentButton[position="last"] {
+    border-left: none;
+}
+QPushButton#segmentButton:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #F5F7FA;
+}
+QPushButton#segmentButton:checked {
+    background: #3457B5;
+    border-color: #3457B5;
+    color: #FFFFFF;
+    font-weight: 600;
+}
+QPushButton#segmentButton:checked:hover {
+    background: #3F6AE0;
+}
+QPushButton#segmentButton:disabled {
+    color: #5C636F;
+    background: rgba(255, 255, 255, 0.02);
+}
+
 QCheckBox::indicator {
     width: 16px;
     height: 16px;
@@ -578,18 +772,21 @@ QSlider::handle:horizontal:disabled {
 
 /* ── group box: a settings section header that costs no extra row ────────── */
 QGroupBox {
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    /* An outlined box on a card needs a visible fill, or the border reads as a
+       stray line and three adjacent groups merge into one undifferentiated
+       column. A slightly recessed surface separates them instead. */
+    background: rgba(255, 255, 255, 0.022);
+    border: 1px solid rgba(255, 255, 255, 0.07);
     border-radius: 14px;
-    margin-top: 20px;
-    padding: 16px 14px 12px 14px;
+    margin-top: 22px;
+    padding: 18px 16px 14px 16px;
 }
 QGroupBox::title {
     subcontrol-origin: margin;
     subcontrol-position: top left;
-    left: 14px;
-    padding: 0 6px;
-    color: #8B93A1;
+    left: 12px;
+    padding: 0 8px;
+    color: #A8AFBC;
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.6px;
@@ -696,7 +893,7 @@ QToolTip {
 
 /* ── empty states ─────────────────────────────────────────────────────────── */
 QLabel#comboEmpty {
-    color: #5C636F;
+    color: #969DAA;
     font-size: 13px;
 }
 """

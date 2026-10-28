@@ -1,5 +1,9 @@
 # PySide6 Migration Record
 
+> Historical migration evidence. Build names, bundle sizes and test counts below
+> describe that migration; use [Local Development](DEVELOPMENT.md) and
+> [Validation Matrix](VALIDATION.md) for the current project.
+
 **Date:** 2026-10-21
 **From:** PyQt5 5.15 / Qt 5 / Python 3.11
 **To:** PySide6 6.12.0 / Qt 6.12 / Python 3.13

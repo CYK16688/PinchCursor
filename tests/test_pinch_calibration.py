@@ -265,3 +265,37 @@ def test_legacy_pixel_threshold_assignment_is_migrated_to_ratios():
     assert classifier.pinch_threshold == pytest.approx(35.0)
     assert classifier.pinch_enter_ratio == pytest.approx(35.0 / 120.0)
     assert classifier.pinch_exit_ratio == pytest.approx(50.0 / 120.0)
+
+
+def test_a_measured_calibration_is_staged_until_save(tmp_path):
+    """Cancel must leave the live thresholds alone, like every other control."""
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from gui.settings_dialog import SettingsDialog
+    from utils.config_manager import ConfigManager
+
+    application = QApplication.instance() or QApplication([])
+    config = ConfigManager(config_path=tmp_path / "settings.json")
+    dialog = SettingsDialog(config)
+    try:
+        dialog._staged_calibration = {
+            "enter_ratio": 0.30,
+            "exit_ratio": 0.42,
+            "sample_count": 11,
+        }
+        # Nothing is written merely because a calibration was measured.
+        assert config.get("pinch_calibration") is None
+
+        dialog.save_settings()
+        application.processEvents()
+
+        stored = config.get("pinch_calibration")
+        assert stored["enter_ratio"] == 0.30
+        assert stored["exit_ratio"] == 0.42
+        assert stored["sample_count"] == 11
+        assert dialog._staged_calibration is None
+    finally:
+        dialog.deleteLater()

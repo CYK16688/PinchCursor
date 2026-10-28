@@ -9,6 +9,7 @@ from PySide6.QtGui import QPainter, QColor, QLinearGradient, QPen
 
 from core.intent_arbiter import CORE_POINTER_GESTURES
 from utils.config_manager import COMBO_ACTIONS
+from utils.hotkey_validation import normalize_hotkey
 from gui.hotkey_input import HotkeyInput
 from gui.i18n import tr
 
@@ -143,6 +144,14 @@ class ComboCard(QFrame):
         self.hotkey_input.hotkeyChanged.connect(self.on_settings_changed)
         layout.addWidget(self.hotkey_input)
 
+        # An unusable chord must be visible where it is typed: validation fails
+        # closed on save, which used to delete the whole combo without a word.
+        self.hotkey_error = QLabel("")
+        self.hotkey_error.setObjectName("fieldError")
+        self.hotkey_error.setWordWrap(True)
+        self.hotkey_error.setVisible(False)
+        layout.addWidget(self.hotkey_error)
+
         # 删除按钮
         self.delete_btn = QPushButton("×")
         self.delete_btn.setObjectName("deleteBtn")
@@ -158,7 +167,38 @@ class ComboCard(QFrame):
 
     def on_settings_changed(self):
         """设置变更"""
+        self.refresh_hotkey_validity()
         self.settingsChanged.emit()
+
+    def refresh_hotkey_validity(self):
+        """Say why a shortcut cannot be saved, while the user is still looking at it."""
+        if self.action_combo.currentData() != "custom_hotkey":
+            self.hotkey_error.setText("")
+            self.hotkey_error.setVisible(False)
+            return
+        raw = self.hotkey_input.text().strip()
+        if not raw:
+            self.hotkey_error.setText(tr("combo.hotkey_required"))
+            self.hotkey_error.setVisible(True)
+            return
+        try:
+            normalize_hotkey(raw)
+        except ValueError:
+            self.hotkey_error.setText(tr("combo.hotkey_invalid"))
+            self.hotkey_error.setVisible(True)
+            return
+        self.hotkey_error.setText("")
+        self.hotkey_error.setVisible(False)
+
+    def hotkey_is_valid(self) -> bool:
+        """True when this card can be persisted without losing its combination."""
+        if self.action_combo.currentData() != "custom_hotkey":
+            return True
+        try:
+            normalize_hotkey(self.hotkey_input.text().strip())
+        except ValueError:
+            return False
+        return True
 
     def get_settings(self):
         """获取当前设置"""

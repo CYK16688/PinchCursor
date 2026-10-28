@@ -2,11 +2,12 @@
 
 from copy import deepcopy
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QDoubleSpinBox,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gui import icons
 from gui.gesture_icons_svg import GestureIconsSVG
 from gui.i18n import tr
 from gui.theme import use_styled_background
@@ -165,8 +167,32 @@ class GestureList(QWidget):
             enabled.setChecked(False)
             configured_action = "none"
         action.setCurrentIndex(max(action.findData(configured_action), 0))
-        detail = QPushButton(tr("gesture.details"))
+        # "Details" used to be a button on every row: twelve identical buttons
+        # for one piece of information. The row itself now opens the editor, and
+        # the chevron advertises that the row is clickable.
+        detail = QPushButton()
+        detail.setObjectName("rowDisclosure")
+        detail.setFixedSize(24, 24)
+        detail.setFlat(True)
+        detail.setCursor(Qt.PointingHandCursor)
+        detail.setIcon(icons.icon("chevron_right", "#8B93A1", 13))
+        detail.setIconSize(QSize(13, 13))
+        detail.setToolTip(tr("gesture.details"))
         detail.clicked.connect(lambda: self.open_details(gesture_id))
+        row.setCursor(Qt.PointingHandCursor)
+
+        # The checkbox and the action picker express one decision, so they must
+        # not disagree: an unchecked row keeps its picker disabled instead of
+        # letting the user choose an action that will never run.
+        def _sync_enabled(checked):
+            action.setEnabled(bool(checked))
+            name.setProperty("muted", not checked)
+            name.style().unpolish(name)
+            name.style().polish(name)
+
+        enabled.toggled.connect(_sync_enabled)
+        _sync_enabled(enabled.isChecked())
+
         layout.setSpacing(10)
         layout.addWidget(self._glyph_label(gesture_id))
         layout.addWidget(enabled)
@@ -180,26 +206,48 @@ class GestureList(QWidget):
     def _create_core_contract_row(self, gesture_id, config):
         """Show the non-remappable deterministic pointer contract."""
         row = QFrame()
-        row.setObjectName("gestureSettingsRow")
+        row.setObjectName("gestureCoreRow")
         layout = QHBoxLayout(row)
         name = QLabel(self._gesture_label(gesture_id))
         name.setObjectName("gestureName")
         contract = QLabel(self._contract_label(gesture_id))
-        contract.setObjectName("summaryLabel")
+        contract.setObjectName("gestureContractAction")
+        settings = None
+        hold_spin = None
         if gesture_id == "pinch":
             detail = tr("gesture.contract.threshold", value=config.get("threshold", 35))
+            settings = QLabel(detail)
+            settings.setObjectName("hintLabel")
         elif gesture_id == "pinch_hold":
-            detail = tr("gesture.contract.hold", value=config.get("hold_time", 0.3))
+            # This number is the whole single-click-versus-drag trade-off: a
+            # pinch released before it is a click, held past it becomes a drag.
+            # It was displayed as read-only text, so the one control that decides
+            # whether clicking feels reliable could not be adjusted at all.
+            hold_spin = QDoubleSpinBox()
+            hold_spin.setObjectName("holdTimeInput")
+            hold_spin.setRange(0.15, 0.90)
+            hold_spin.setSingleStep(0.05)
+            hold_spin.setDecimals(2)
+            hold_spin.setSuffix(tr("common.unit.seconds"))
+            hold_spin.setValue(float(config.get("hold_time", 0.3)))
+            hold_spin.setToolTip(tr("gesture.contract.hold_hint"))
         else:
-            detail = tr("gesture.details")
-        settings = QLabel(detail)
-        settings.setObjectName("hintLabel")
+            # "Move pointer" has no threshold to show; a lock badge states the
+            # one fact that matters about this group instead of repeating
+            # "Details" three rows running.
+            detail = tr("gesture.contract.fixed")
+            settings = QLabel(detail)
+            settings.setObjectName("hintLabel")
         layout.setSpacing(10)
         layout.addWidget(self._glyph_label(gesture_id))
         layout.addWidget(name, 1)
         layout.addWidget(contract)
-        layout.addWidget(settings)
+        if hold_spin is not None:
+            layout.addWidget(hold_spin)
+        elif settings is not None:
+            layout.addWidget(settings)
         self._core_row_widgets[gesture_id] = (name, contract, settings)
+        self._hold_time_spin = hold_spin if hold_spin is not None else getattr(self, "_hold_time_spin", None)
         return row
 
     def group_labels(self):
@@ -227,11 +275,16 @@ class GestureList(QWidget):
             name.setText(self._gesture_label(gesture_id))
             contract.setText(self._contract_label(gesture_id))
             if gesture_id == "pinch":
-                settings.setText(tr("gesture.contract.threshold", value=config.get("threshold", 35)))
+                if settings is not None:
+                    settings.setText(tr("gesture.contract.threshold", value=config.get("threshold", 35)))
             elif gesture_id == "pinch_hold":
-                settings.setText(tr("gesture.contract.hold", value=config.get("hold_time", 0.3)))
-            else:
-                settings.setText(tr("gesture.details"))
+                # This row carries an editable spin box instead of a label.
+                spin = getattr(self, "_hold_time_spin", None)
+                if spin is not None:
+                    spin.setSuffix(tr("common.unit.seconds"))
+                    spin.setToolTip(tr("gesture.contract.hold_hint"))
+            elif settings is not None:
+                settings.setText(tr("gesture.contract.fixed"))
         for editor in tuple(self._open_editors.values()):
             editor.retranslate_ui()
 
@@ -240,6 +293,9 @@ class GestureList(QWidget):
             config.set_gesture(gesture_id, "enabled", enabled.isChecked())
             config.set_gesture(gesture_id, "action", action.currentData())
             config.set_gesture(gesture_id, "hotkey", self.gestures[gesture_id].get("hotkey", ""))
+        hold_spin = getattr(self, "_hold_time_spin", None)
+        if hold_spin is not None:
+            config.set_gesture("pinch_hold", "hold_time", round(float(hold_spin.value()), 2))
 
     def open_details(self, gesture_id):
         """Open at most one staged details editor for each optional gesture."""

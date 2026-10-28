@@ -9,6 +9,7 @@ from core.control_session import SessionState
 from core.dynamic_gesture_template import DynamicGestureTemplate
 from gui import main_window
 from platform_services.contracts import ActionResult
+from tests.test_control_engine import pose
 
 
 def _template(action="scroll_up", hotkey=""):
@@ -133,18 +134,19 @@ def test_pinch_frame_never_enters_dynamic_shortcut_matching(tmp_path, monkeypatc
         window._check_edge_lost = lambda _landmarks, _now: None
         window.classifier.classify = lambda _landmarks, **_kwargs: "pinch"
         window.classifier.get_pinch_info = lambda _landmarks, **_kwargs: {
-            "distance": 20, "velocity": -10, "is_approaching": True
+            "distance": 20, "velocity": -10, "is_approaching": True, "is_pinching": True
         }
         window._refresh_control_session_status = lambda **_kwargs: None
         window._get_status_text = lambda _detected: "test"
         window._render_hud = lambda **_kwargs: None
         window._draw_landmarks = lambda frame, _landmarks: frame
+        window._draw_aiming_indicator = lambda frame, _position: frame
         window._draw_edge_hint = lambda frame, **_kwargs: frame
         window.display_frame = lambda _frame: None
         window.action_coordinator.dispatch = lambda request: dispatched.append(request) or ActionResult(True)
         frame = type("Frame", (), {"shape": (480, 640, 3)})()
         landmark_frame = type("LandmarkFrame", (), {
-            "frame": frame, "landmarks": [(0.0, 0.0, 0.0)] * 21
+            "frame": frame, "landmarks": pose("pinch")
         })()
 
         window.process_frame(landmark_frame)
@@ -189,7 +191,7 @@ def test_live_dynamic_lane_does_not_claim_a_motion_without_a_saved_runtime_templ
         window.action_coordinator.dispatch = lambda request: dispatched.append(request) or ActionResult(True)
         frame = type("Frame", (), {"shape": (480, 640, 3)})()
         landmark_frame = type("LandmarkFrame", (), {
-            "frame": frame, "landmarks": [(0.0, 0.0, 0.0)] * 21
+            "frame": frame, "landmarks": pose("open_hand")
         })()
 
         for _ in range(5):
@@ -234,7 +236,7 @@ def test_dynamic_recording_owns_the_frame_and_suppresses_static_actions_and_comb
         window.action_coordinator.dispatch = lambda request: dispatched.append(request) or ActionResult(True)
         frame = type("Frame", (), {"shape": (480, 640, 3)})()
         landmark_frame = type("LandmarkFrame", (), {
-            "frame": frame, "landmarks": [(0.0, 0.0, 0.0)] * 21
+            "frame": frame, "landmarks": pose("open_hand")
         })()
 
         for _ in range(5):
@@ -274,7 +276,7 @@ def test_live_dynamic_shortcut_matches_only_after_a_complete_neutral_delimited_m
         window.action_coordinator.dispatch = lambda request: dispatched.append(request) or ActionResult(True)
         frame = type("Frame", (), {"shape": (480, 640, 3)})()
         landmark_frame = type("LandmarkFrame", (), {
-            "frame": frame, "landmarks": [(0.0, 0.0, 0.0)] * 21
+            "frame": frame, "landmarks": pose("open_hand")
         })()
 
         for _ in range(6):

@@ -101,11 +101,3 @@ def build_features(
         row.append(rank_of[len(rows)])
         rows.append(row)
     return rows
-
-
-def sigmoid(value: float) -> float:
-    if value >= 40:
-        return 1.0
-    if value <= -40:
-        return 0.0
-    return 1.0 / (1.0 + math.exp(-value))

@@ -5,6 +5,7 @@ import tempfile
 
 import pytest
 from PySide6.QtGui import QCursor
+from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QApplication
 
 from core.pointer_mapping import AbsoluteMapper, RelativeMapper, ScreenBounds
@@ -66,16 +67,18 @@ def test_relative_mode_moves_by_displacement_times_gain(app):
     )
 
 
-def test_reanchor_after_hand_returns_keeps_the_cursor_still(app):
+def test_reanchor_after_hand_returns_uses_actual_cursor_even_if_mouse_moved(app, monkeypatch):
     window = _window(mapper=RelativeMapper(gain=2.0))
     MainWindow._map_pointer(window, (320, 240), FRAME)
     moved = MainWindow._map_pointer(window, (500, 400), FRAME)
+    window._last_cursor_pos = moved
 
     # Hand leaves the frame; the caller flags a pending re-anchor.
     window._pointer_anchor_pending = True
+    monkeypatch.setattr(QCursor, "pos", lambda: QPoint(210, 160))
     reanchored = MainWindow._map_pointer(window, (100, 100), FRAME)
 
-    assert reanchored == moved
+    assert reanchored == (210, 160)
 
 
 def test_refresh_builds_a_relative_mapper_from_configuration(app):

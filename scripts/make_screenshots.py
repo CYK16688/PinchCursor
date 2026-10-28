@@ -21,6 +21,7 @@ app.setStyle("Fusion")
 from gui import icons                       # noqa: E402
 from utils.config_manager import ConfigManager  # noqa: E402
 from gui.theme import DARK_THEME, apply_dark_palette  # noqa: E402
+from gui.i18n import set_locale                          # noqa: E402
 
 apply_dark_palette(app)
 app.setStyleSheet(DARK_THEME)
@@ -98,23 +99,56 @@ def services(camera, accessibility):
     )
 
 
-def shot_main(name, camera, accessibility):
+def shot_main(name, camera, accessibility, *, locale="zh_CN", size=(1200, 720), phase=None):
     # Force a clean configuration so the screenshots show first-run defaults
     # instead of whatever the developer's settings file happens to contain.
     fresh = pathlib.Path(tempfile.mkdtemp()) / "settings.json"
-    mw.ConfigManager = lambda: ConfigManager(config_path=fresh)
+    config = ConfigManager(config_path=fresh)
+    config.set("ui", "language", locale)
+    mw.ConfigManager = lambda: config
     mw.create_platform_services = lambda **_kwargs: services(camera, accessibility)
     window = mw.MainWindow()
-    window.resize(1200, 720)
+    window.resize(*size)
     window.show()
+    if phase is not None:
+        # A clearly labelled synthetic state illustrates the real feedback
+        # widgets without starting a camera or posting native input.
+        from core.action_state_machine import ActionState
+        from core.control_engine import ControlSnapshot
+        from core.control_session import SessionState
+        from PySide6.QtGui import QColor, QPainter, QPixmap
+        from PySide6.QtCore import Qt
+        import time
+
+        window.is_running = True
+        window._refresh_precision_console()
+        window._present_control_snapshot(ControlSnapshot(
+            time.monotonic(), "pinch", "pinch", SessionState.POINTER,
+            ActionState.CLICKING, True, (600, 300), (600, 300), pinch_phase=phase,
+        ))
+        preview = QPixmap(640, 400)
+        preview.fill(QColor("#090A0D"))
+        painter = QPainter(preview)
+        glyph = window._placeholder_pixmap(96, "#AFC5FF")
+        painter.drawPixmap(272, 120, glyph)
+        painter.setPen(QColor("#969DAA"))
+        painter.drawText(preview.rect().adjusted(0, 230, 0, -100), Qt.AlignCenter,
+                         "模拟手势回放 / Gesture replay")
+        painter.end()
+        window.video_label.setPixmap(preview)
     for _ in range(4):
         app.processEvents()
     window.grab().save(str(OUT / name))
+    window.is_running = False
     window.close()
 
 
 shot_main("main-ready.png", AuthorizationState.GRANTED, AuthorizationState.GRANTED)
 shot_main("main-permissions.png", AuthorizationState.GRANTED, AuthorizationState.DENIED)
+shot_main("main-compact-en.png", AuthorizationState.GRANTED, AuthorizationState.GRANTED,
+          locale="en_US", size=(1000, 660))
+shot_main("main-pinch-confirmed.png", AuthorizationState.GRANTED, AuthorizationState.GRANTED,
+          phase="confirmed")
 
 
 # ---- settings pages -------------------------------------------------------
@@ -124,6 +158,7 @@ import time                                                  # noqa: E402
 
 tmp = pathlib.Path(tempfile.mkdtemp())
 config = ConfigManager(config_path=tmp / "settings.json")
+set_locale("zh_CN")
 
 store = TelemetryStore(default_path(config.config_path), enabled=True)
 now = time.time() - 600
@@ -145,6 +180,11 @@ dialog.open_section("control")
 for _ in range(3):
     app.processEvents()
 dialog.grab().save(str(OUT / "settings-control.png"))
+
+dialog.open_section("activation")
+for _ in range(3):
+    app.processEvents()
+dialog.grab().save(str(OUT / "settings-activation.png"))
 
 dialog.open_section("gestures")
 for _ in range(3):

@@ -139,9 +139,3 @@ def tune_snapping(
         )
 
     return SnappingTuning(radius, floor, False, "within_band", clicks_i, misses_i, miss_rate)
-
-
-def format_tuning(tuning: SnappingTuning) -> str:
-    """One line a settings page can show without re-deriving anything."""
-    rate = "—" if tuning.miss_rate is None else f"{tuning.miss_rate:.0%}"
-    return f"{tuning.max_snap_distance:g} px · {tuning.min_confidence:.2f} · {tuning.reason} ({rate})"

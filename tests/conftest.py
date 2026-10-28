@@ -20,6 +20,23 @@ def reset_process_locale():
     set_locale(DEFAULT_LOCALE)
 
 
+@pytest.fixture(autouse=True)
+def isolate_user_data_dir(tmp_path, monkeypatch):
+    """Never let a test read or write the developer's real settings.
+
+    A window built without an explicit config path resolves the per-user data
+    directory, so an unisolated test would load whatever this machine's
+    ``settings.json`` happens to contain — enabled dynamic gestures, recorded
+    templates, a different locale — and the verdict would depend on the machine.
+    """
+    from utils import config_manager
+
+    sandbox = tmp_path / "_userdata"
+    sandbox.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(config_manager, "user_data_dir", lambda: str(sandbox))
+    yield
+
+
 # --- Qt teardown containment -------------------------------------------------
 #
 # PySide6 6.12 aborts on macOS during CPython interpreter finalization:

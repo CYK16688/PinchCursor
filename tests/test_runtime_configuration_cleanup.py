@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
@@ -77,7 +79,15 @@ def test_runtime_configuration_refreshes_live_pointer_and_detector_settings(tmp_
     try:
         window._refresh_runtime_configuration()
 
-        assert window.smoother.filter_x.beta == 0.012
+        # The smoothing preference drives ``mincutoff`` (resting jitter), not
+        # ``beta`` (high-speed follow). It used to be wired to beta, which made
+        # the dial do nothing measurable to a still hand.
+        from utils.smoothing import CURSOR_SMOOTHING_BETA, mincutoff_for_smoothing
+
+        assert window.smoother.filter_x.beta == CURSOR_SMOOTHING_BETA
+        assert window.smoother.filter_x.mincutoff == pytest.approx(
+            mincutoff_for_smoothing(0.012, default=window.preset.smoothing_mincutoff)
+        )
         assert window.detector_type == "mediapipe"
         assert window.detection_confidence == 0.82
         assert window.tracking_confidence == 0.61

@@ -135,7 +135,8 @@ def test_settings_dialog_retranslates_control_permissions_and_children_without_m
         assert dialog.windowTitle() == "PinchCursor Settings"
         assert dialog.title_label.text() == "Settings"
         assert dialog.reset_button.text() == "Restore defaults"
-        assert dialog.control_title_label.text() == "Control session"
+        # Named for what the page governs; it used to echo the sidebar entry.
+        assert dialog.control_title_label.text() == "Activation & pointer"
         assert dialog.permissions_title_label.text() == "Permissions"
         assert dialog.camera_page.title_label.text() == "Camera"
         assert dialog.feedback_page.title_label.text() == "Feedback"

@@ -9,17 +9,91 @@ env -u PYTHONPATH .venv/bin/python -m compileall -q core gui platform_services u
 env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
 ```
 
-Latest verified result (repeated runs, exit code checked each time):
+Latest automated result (2026-10-28, exit code checked):
 
 ```text
-474 passed
+1353 passed in 115.01s
 compileall passed
 exit code 0
 ```
 
-**A run is only green when it prints `474 passed` AND exits `0`.** The suite
+**A run is only green when all collected tests pass AND it exits `0`.** The suite
 report is followed by a deliberate `os._exit` in `tests/conftest.py`; see
 [PYSIDE6-MIGRATION.md](PYSIDE6-MIGRATION.md) for why PySide6 requires it.
+
+### Product identity and cleanup
+
+The canonical `gui/resources/pinchcursor.png` is used by the app and README,
+with ICNS/ICO exports for platform packaging. `test_app_branding.py` verifies
+transparent artwork, resource loading under a simulated PyInstaller extraction
+root, every shipped ICO resolution, and a macOS `iconutil` decode of the ICNS.
+The existing HiDPI tests verify logical sizing. UI screenshots were regenerated.
+
+Old logo variants and the unused concept note were removed, together with seven
+unreferenced helpers. The full regression suite above passed after these changes.
+The Windows build script now points to `PinchCursor.spec` and the current output
+name; no Windows executable or new macOS app bundle was built in this pass.
+See [Branding](BRANDING.md) for the source, exports and generation record.
+
+### Control workspace UI
+
+The UI refactor applies the Intent context, heuristic evaluation and Journey
+progressive-disclosure skills to the existing native desktop interface. The
+main window now separates session controls, transaction feedback, settings
+shortcuts and an action-first gesture guide. Control settings open on pointer
+mapping, fine control and calibration; activation and advanced options have
+separate tabs. [Design context and evaluation](ui/context-pinchcursor.md).
+
+`test_control_workspace.py` verifies real Qt widgets at exactly 1000×660 and
+1200×760 in Chinese and English, with ready and permission-blocked states. It
+checks containment/overlap, truthful coalesced action results, keyboard Escape
+that only stops, and routes to the intended settings tab.
+`test_settings_control_hierarchy.py` verifies primary controls at 900×640 and
+1040×720, translated accessible names and staged Save/Cancel persistence.
+`test_summary_row_accessibility.py` checks native button role and press action.
+`test_control_workspace.py` also verifies that candidate snapshots keep a pointer
+HUD with no preview lock marker, and confirmation alone displays the lock.
+`test_interaction_feedback.py` verifies discrete gesture phases and bounded
+presentation of successes/failures without delaying the next interaction.
+
+Screenshots in `docs/screenshots/` were regenerated from real widgets using fake
+platform services. `main-pinch-confirmed.png` is explicitly labelled as a
+synthetic gesture replay. No physical camera, native mouse event, manual
+VoiceOver session or real-user usability study was used for this validation.
+
+### Continuous-control regression evidence
+
+The 2026-10-28 changes were tested locally without opening a physical camera or
+posting native mouse events. The existing detector smoke test still runs real
+MediaPipe inference on an empty image; it does not measure gesture accuracy.
+
+| Area | Evidence |
+|---|---|
+| Full pointer lifecycle | `test_continuous_pointer_pipeline.py` passes landmarks through the real classifier, dynamics, session, arbiter, state machine, smoothing, coordinator and macOS controller, ending at a fake native facade. Click/double-click and drag/release cases run at 15/30/60 FPS. |
+| Joint click/aim inference | `test_joint_pinch_pipeline.py` contains 114 complete-chain cases. The 24 moving target cases compare against an independently primed open-finger trajectory at the first contraction frame: sudden/gradual closing at 15/30/60 FPS, absolute center/left/right edge and relative mapping. All measured click coordinates match that synthetic reference (0.0 screen-point error; test tolerance 4 points). Stationary index curls of 20/30/40 camera pixels also preserve aim. |
+| Candidate pointer continuity | Independent ordinary-pointer replays compare every native move at 15/30/60 FPS in absolute/relative modes. Gradual pre-threshold contraction, candidate admission and unconfirmed opening/cancellation do not rewind or interrupt the visible filter path. Confirmed clicks still use the onset target. Cancelled episodes allow safe open movement before click rearming, while lost/stale/gapped/incoherent frames emit no events. |
+| Physical intent and recovery | One-frame closure, incomplete approach, fist transitions, missing/stale/gapped observations and incoherent palm jumps emit no click and permit a fresh deliberate click after genuine opening. Curl-only long holds do not drag or become clicks; whole-hand translation drags and releases once. Consecutive pinches rearm at 15/30/60 FPS. |
+| Reconstruction boundaries | Camera dimension changes during a candidate or drag discard the episode and release exactly the owed button; absent trusted filter history reports cancellation. Both absolute and relative paths recover after opening. Numeric filter copies preserve bound clock services, including owners with locks. |
+| Physical timing and FSM authority | Observer/FSM tests distinguish physical closure from confidence dwell, keep original opening time through release debounce, snap targets once, and prevent cancelled candidates or late labels from re-admitting a click. Zone filtering and native release remain enforced. |
+| Continuous scrolling | Core scroll replays run at 15/30/60 FPS without an AX provider: stable pointing arms, thumb direction confirms, wheel ticks repeat at a bounded rate and raw pose exit stops immediately. Separate contextual-only tests retain target-identity invalidation. |
+| Release recovery | `macos/test_release_recovery.py` and `test_input_guard.py` cover failed mouse-up, partially delivered clicks, repeated recovery, and retry while fresh frames continue. No new press is allowed while release remains pending. |
+| Camera stalls and UI stalls | `test_input_guard.py` verifies a separate watchdog releases without another Qt callback, and rejects dispatch after a slow context lookup. A 250 ms frame lease with nominal 25 ms watchdog polling is a software timeout policy, not a hard real-time or OS-delivery guarantee. |
+| Backpressure and restart | `test_frame_mailbox.py` verifies one pending latest-frame notification, discarding old worker notifications after restart, and safe retirement when capture blocks in `read()`. |
+| Fine control | `test_dead_zone.py`, `test_cursor_smoothing.py` and `test_pointer_mapping.py` cover subpixel observations, 1–8 point corrections, modest synthetic noise, screen endpoints and overshoot prevention. These are algorithmic replays, not measured user performance. |
+| Independent control owner | `test_control_engine.py` and `test_control_runtime.py` run the real decision chain without Qt event processing, including blocked accessibility/disk calls, stop during an in-flight decision, one-slot frame replacement and native failures. |
+| Live window wiring | `test_control_runtime_window.py` calls the actual camera-to-runtime callback from a producer thread without pumping Qt, reaches the macOS adapter with a fake native sink, rejects old callbacks after restart, and verifies failed restart/owed release/blocked AX handling. |
+| Native-call stalls | Stuck native down/up test doubles cannot block the GUI-side runtime stop. Input is revoked immediately; the serialized release finishes only after the stalled native call returns. |
+| Auxiliary freshness and bounds | `test_async_services.py` checks bounded request/write queues, request-start cache age, spatial validity, invalidation generations, policy-disabled behavior, and deferred store disposal. |
+| Native cursor reanchor | Fake Quartz and Win32 cursor readers retain fractional/negative coordinates and reject malformed positions; relative mapping does not read QCursor from the control thread. |
+
+Manual acceptance remains required for actual camera lighting/distance, left and
+right hands, small controls, Finder/text selection, drag-and-drop, scrolling,
+multi-display geometry, camera unplugging and sustained-use fatigue. Record
+task completion/error rates and motion-to-event latency against a physical
+mouse. Episode ordering now records actual successful dispatch before resolving a
+released pinch, and failed input cannot become a positive action label. That
+software correction does not establish real-user label quality or qualify a
+trained model for promotion.
 
 Verified by automated tests:
 
@@ -40,6 +114,9 @@ Verified by automated tests:
 | Factory routing | Passed | `create_platform_services("Darwin")` yields 13 supported actions; `("Windows")` composes the Windows adapter set when a native facade can be built and otherwise degrades to `Unavailable*` services instead of raising |
 
 ## macOS development bundle
+
+The bundle observations below predate this runtime refactor; this batch verifies
+source behavior and does not establish a newly packaged app's device behavior.
 
 ```bash
 ./scripts/build_macos_app.sh

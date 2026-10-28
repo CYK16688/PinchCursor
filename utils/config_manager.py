@@ -2,6 +2,10 @@
 
 import json
 import os
+import shutil
+import sys
+import tempfile
+import time
 from copy import deepcopy
 from math import isfinite
 
@@ -14,7 +18,7 @@ CURRENT_SCHEMA_VERSION = 4
 DYNAMIC_ACTIONS = ALLOWED_DYNAMIC_ACTIONS
 DYNAMIC_TEMPLATE_FIELDS = frozenset({
     "template_id", "name", "action", "hotkey", "samples",
-    "threshold", "cooldown_seconds", "min_motion_energy",
+    "threshold", "cooldown_seconds", "min_motion_energy"
 })
 TEMPLATE_GATE_KEYS = (
     "threshold",
@@ -29,10 +33,10 @@ DYNAMIC_DEFAULTS = {
     "neutral_rearm_frames": 3,
     "end_neutral_frames": 2,
     "max_recording_frames": 180,
-    "max_duration_seconds": 3.0,
+    "max_duration_seconds": 3.0
 }
 LIFECYCLE_INTEGER_DEFAULT_KEYS = frozenset({
-    "neutral_rearm_frames", "end_neutral_frames", "max_recording_frames",
+    "neutral_rearm_frames", "end_neutral_frames", "max_recording_frames"
 })
 CORE_POINTER_GESTURES = frozenset({"point", "pinch", "pinch_hold"})
 # Generic combinations are discrete optional commands only. Continuous drag
@@ -91,7 +95,7 @@ def normalize_gesture_combos(value):
             "gesture1": gesture1,
             "gesture2": gesture2,
             "action": action,
-            "hotkey": hotkey,
+            "hotkey": hotkey
         })
     return normalized
 
@@ -173,7 +177,7 @@ def _safe_dynamic_template(value, defaults):
         "threshold": template.threshold,
         "cooldown_seconds": template.cooldown_seconds,
         "min_motion_energy": template.min_motion_energy,
-        "context_category": template.context_category,
+        "context_category": template.context_category
     }
 
 
@@ -188,14 +192,14 @@ def normalize_dynamic_gestures(value):
         "templates": [
             safe for item in templates
             if (safe := _safe_dynamic_template(item, defaults)) is not None
-        ],
+        ]
     }
 
 
 DEFAULT_CONFIG = {
     "schema_version": CURRENT_SCHEMA_VERSION,
     "ui": {
-        "language": DEFAULT_LOCALE,
+        "language": DEFAULT_LOCALE
     },
     "camera": {
         "id": 0,
@@ -209,7 +213,7 @@ DEFAULT_CONFIG = {
         "detector_type": "mediapipe"
     },
     "performance": {
-        "mode": "standard",
+        "mode": "standard"
     },
     "pointer_assist": {
         "enabled": True,
@@ -220,100 +224,109 @@ DEFAULT_CONFIG = {
         "search_radius": 120.0,
         # Written by core.adaptive_tuning from local click outcomes; empty means
         # the values above are still the ones in force.
-        "learned": {},
+        "learned": {}
     },
     "pointer_mapping": {
         "mode": "absolute",
-        "gain": 2.0,
+        # Gain multiplies hand displacement into cursor travel, so it multiplies
+        # resting jitter too: measured at 30 fps the still-hand jitter is 11 px at
+        # 1.0 and 22 px at 2.0. 1.4 keeps most of the arm-travel saving (a hand
+        # sweep of 0.71 of the frame still covers the display instead of 0.5)
+        # while giving up a quarter of the jitter.
+        "gain": 1.4
+    },
+    "pointer_scroll": {
+        # Core wheel control does not depend on AX target discovery or optional
+        # thumb shortcut bindings. Point at rest, then hold a thumb direction.
+        "enabled": True,
+        "dwell_seconds": 0.3,
+        "repeat_seconds": 0.12,
+        "enter_seconds": 0.08,
     },
     "telemetry": {
-        "enabled": False,
+        "enabled": False
     },
     "temporal": {
         "transition_guard": True,
         # Empty means "transition_model.json beside the config", which is where
         # scripts/train_transition.py writes by default.
-        "transition_model": "",
+        "transition_model": ""
     },
     "global_sensitivity": {
         "scroll_speed": 50,
-        "smoothing": 0.005
+        "smoothing": 0.005,
+        # Screen points the hand must travel before the pointer follows at all.
+        # Removes the shaking of a resting hand entirely; 0 disables it (needed
+        # for drawing, where every sub-pixel move is intentional).
+        "dead_zone": 8.0,
     },
     "gestures": {
         "point": {
             "enabled": True,
             "action": "move_cursor",
-            "hotkey": "",
-            "description": "指向 - 控制光标移动"
+            "hotkey": ""
         },
         "pinch": {
             "enabled": True,
             "action": "left_click",
             "hotkey": "",
-            "threshold": 35,
-            "description": "捏合 - 左键点击"
+            "threshold": 35
         },
         "pinch_hold": {
             "enabled": True,
             "action": "drag",
             "hotkey": "",
-            "hold_time": 0.3,
-            "description": "捏合长按 - 拖动操作"
+            "hold_time": 0.3
         },
         "peace": {
             "enabled": True,
             "action": "right_click",
-            "hotkey": "",
-            "description": "剪刀手 - 右键点击"
+            "hotkey": ""
         },
         "open_hand": {
             "enabled": False,
             "action": "none",
-            "hotkey": "",
-            "description": "张开手掌 - 自定义功能"
+            "hotkey": ""
         },
         "fist": {
             "enabled": False,
             "action": "none",
-            "hotkey": "",
-            "description": "握拳 - 自定义功能"
+            "hotkey": ""
         },
         "ilove_you": {
             "enabled": False,
             "action": "none",
-            "hotkey": "",
-            "description": "我爱你手势 - 拇指、食指和小指伸出"
+            "hotkey": ""
         },
         "thumb_up": {
             "enabled": False,
             "action": "none",
             "hotkey": "",
-            "description": "拇指向上 - 音量增加"
+            # Descriptions must describe what the app can actually do: there is
+            # no volume action, so promising "音量增加" here was a lie in the
+            # persisted settings file. Core thumb scrolling is configured in
+            # pointer_scroll; this record controls only an optional shortcut.
         },
         "thumb_down": {
             "enabled": False,
             "action": "none",
-            "hotkey": "",
-            "description": "拇指向下 - 音量减少"
+            "hotkey": ""
         },
         "ok": {
             "enabled": False,
             "action": "none",
-            "hotkey": "",
-            "description": "OK手势 - 自定义功能"
+            "hotkey": ""
         },
         "rock": {
             "enabled": False,
             "action": "none",
-            "hotkey": "",
-            "description": "摇滚手势 - 自定义功能"
+            "hotkey": ""
         },
         "three": {
             "enabled": False,
             "action": "none",
-            "hotkey": "",
-            "description": "三指 - 自定义功能"
-        },
+            "hotkey": ""
+        }
 
     },
     "stabilization": {
@@ -350,17 +363,17 @@ DEFAULT_CONFIG = {
         "no_hand_timeout_seconds": 2.0,
         "activation_template_id": "",
         "exit_template_id": "",
-        "custom_static_templates": [],
+        "custom_static_templates": []
     },
     "feedback": {
         "mode": "standard",
         "opacity": 0.92,
-        "scale": 1.0,
+        "scale": 1.0
     },
     "dynamic_gestures": {
         "enabled": False,
         "defaults": deepcopy(DYNAMIC_DEFAULTS),
-        "templates": [],
+        "templates": []
     },
     # Pointer move/click/drag are an exclusive real-time intent lane. Generic
     # shortcut combinations begin empty and may only use non-pointer gestures.
@@ -368,6 +381,70 @@ DEFAULT_CONFIG = {
 }
 
 CONFIG_FILE = "settings.json"
+# Load failures are recorded here so the UI can say "your settings could not be
+# read" instead of silently reverting a calibrated setup to the defaults.
+_LAST_LOAD_ERROR: str = ""
+
+
+def last_load_error() -> str:
+    """Return why the most recent load fell back to defaults, or "" if clean."""
+    return _LAST_LOAD_ERROR
+
+
+def user_data_dir() -> str:
+    """Return the per-user directory that owns writable state.
+
+    A frozen build must never write beside its own modules: inside a macOS
+    ``.app`` that path is ``Contents/Frameworks``, which is part of the sealed
+    bundle. Adding a file there invalidates the code signature (Gatekeeper then
+    refuses to launch the app, and every TCC grant keyed to the signature is
+    lost on the next build), and an app installed under /Applications is not
+    guaranteed to be writable at all. ``utils/single_instance.py`` already keeps
+    its lock in this directory, so both halves of the runtime state agree.
+    """
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "PinchCursor")
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~"), "Library", "Application Support", "PinchCursor")
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "PinchCursor")
+
+
+def _legacy_config_path() -> str:
+    """The pre-migration location: beside the package, i.e. inside the bundle."""
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), CONFIG_FILE)
+
+
+def migrate_legacy_config(target_path: str) -> str | None:
+    """Move a settings file out of the app bundle, once, and return its origin.
+
+    Returns the legacy path when a migration actually happened so the caller can
+    also move the telemetry database that used to live beside it.
+    """
+    legacy = _legacy_config_path()
+    moved = False
+    if not os.path.exists(target_path) and os.path.isfile(legacy):
+        if os.path.abspath(legacy) != os.path.abspath(target_path):
+            try:
+                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                # Move, not copy: a stale file left inside the bundle keeps
+                # breaking the seal on every launch that reads it.
+                shutil.move(legacy, target_path)
+                moved = True
+            except OSError:
+                moved = False
+    if moved:
+        # telemetry.py places its database beside the settings file, so the
+        # history recorded at the old location must follow it or it is orphaned.
+        legacy_db = os.path.join(os.path.dirname(legacy), "telemetry.sqlite3")
+        new_db = os.path.join(os.path.dirname(target_path), "telemetry.sqlite3")
+        if os.path.isfile(legacy_db) and not os.path.exists(new_db):
+            try:
+                shutil.move(legacy_db, new_db)
+            except OSError:
+                pass
+    return legacy if moved else None
 
 
 class ConfigManager:
@@ -375,23 +452,43 @@ class ConfigManager:
 
     def __init__(self, config_path=None):
         self.config = deepcopy(DEFAULT_CONFIG)
-        self.config_path = os.fspath(config_path) if config_path is not None else self._get_config_path()
+        if config_path is not None:
+            self.config_path = os.fspath(config_path)
+        else:
+            self.config_path = self._get_config_path()
+            migrate_legacy_config(self.config_path)
         self.load()
 
     def _get_config_path(self):
-        """获取配置文件路径"""
-        base_dir = os.path.dirname(os.path.dirname(__file__))
-        return os.path.join(base_dir, CONFIG_FILE)
+        """Return the writable settings path owned by this user."""
+        return os.path.join(user_data_dir(), CONFIG_FILE)
 
     def load(self):
-        """加载配置文件"""
-        if os.path.exists(self.config_path):
-            try:
-                with open(self.config_path, 'r', encoding='utf-8') as f:
-                    loaded = json.load(f)
-                    self._merge_config(loaded)
-            except Exception:
-                pass
+        """加载配置文件，损坏时保留现场并记录原因而不是静默回退"""
+        global _LAST_LOAD_ERROR
+        _LAST_LOAD_ERROR = ""
+        if not os.path.exists(self.config_path):
+            return
+        try:
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                loaded = json.load(f)
+        except (OSError, ValueError) as exc:
+            # Defaults are the only safe fallback, but the unusable file is kept
+            # aside so the user's calibration and recorded takes are recoverable
+            # and the next save cannot destroy them.
+            _LAST_LOAD_ERROR = f"{type(exc).__name__}: {exc}"
+            self._quarantine_unreadable_config()
+            return
+        self._merge_config(loaded)
+
+    def _quarantine_unreadable_config(self):
+        """Keep an unreadable settings file next to the original, once per launch."""
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        corrupt = f"{self.config_path}.corrupt-{stamp}"
+        try:
+            os.replace(self.config_path, corrupt)
+        except OSError:
+            pass
 
     def _merge_config(self, loaded):
         """合并加载的配置与默认配置"""
@@ -443,6 +540,11 @@ class ConfigManager:
         if isinstance(action_mode, dict):
             # Core pointer lifecycle is not an opt-in legacy mode.
             action_mode.pop("enabled", None)
+        camera = self.config.get("camera")
+        if isinstance(camera, dict):
+            # Written by an early build that probed for an IR sensor. Nothing
+            # reads it, so it would otherwise survive in the file forever.
+            camera.pop("type", None)
         detection = self.config.get("detection")
         if not isinstance(detection, dict):
             detection = {}
@@ -463,6 +565,9 @@ class ConfigManager:
                 if not isinstance(gesture, dict):
                     continue
                 gesture.pop("sensitivity", None)
+                # Labels come from the i18n catalogue; this key only persisted a
+                # second, untranslatable copy of the same words and was never read.
+                gesture.pop("description", None)
             for gesture_id, gesture in gestures.items():
                 if not isinstance(gesture, dict) or gesture_id in CORE_POINTER_GESTURES:
                     continue
@@ -509,7 +614,15 @@ class ConfigManager:
                 destination[key] = deepcopy(value)
 
     def save(self):
-        """保存配置到文件"""
+        """保存配置到文件（先写临时文件再原子替换）
+
+        ``open(path, "w")`` truncates the live file before the new document
+        exists, so a crash, a full disk or a sleep mid-write leaves an unreadable
+        settings.json behind — which on the next launch means every calibrated
+        threshold and every recorded take is gone. Writing a sibling temporary
+        file and renaming it over the target makes the swap atomic: the old file
+        stays intact until the new one is complete on disk.
+        """
         self._normalize_ui_locale()
         self._normalize_legacy_shapes()
         self._normalize_configured_hotkeys()
@@ -519,8 +632,21 @@ class ConfigManager:
         self.config["gesture_combos"] = normalize_gesture_combos(
             self.config.get("gesture_combos")
         )
-        with open(self.config_path, 'w', encoding='utf-8') as f:
-            json.dump(self.config, f, indent=2, ensure_ascii=False)
+        directory = os.path.dirname(os.path.abspath(self.config_path))
+        os.makedirs(directory, exist_ok=True)
+        handle, temp_path = tempfile.mkstemp(prefix=".settings-", suffix=".tmp", dir=directory)
+        try:
+            with os.fdopen(handle, 'w', encoding='utf-8') as f:
+                json.dump(self.config, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, self.config_path)
+        except BaseException:
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+            raise
 
     def get(self, section, key=None):
         """获取配置值"""

@@ -4,6 +4,7 @@ from copy import deepcopy
 
 from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
+from gui.controls import ToggleSwitch
 from gui.i18n import tr
 from .dynamic_gesture_record_dialog import DynamicGestureRecordDialog
 from utils.config_manager import normalize_dynamic_gestures
@@ -34,7 +35,9 @@ class DynamicGestureSettingsPage(QWidget):
         self.hint_label = QLabel()
         self.hint_label.setObjectName("hintLabel")
         self.hint_label.setWordWrap(True)
-        self.enabled_check = QCheckBox()
+        # A whole feature on/off: a switch says "flip this", a checkbox
+        # reads as "pick this one from a set".
+        self.enabled_check = ToggleSwitch()
         self.enabled_check.setChecked(self._staged["enabled"])
         self.action_selector = QComboBox()
         for action, key in self.ACTION_KEYS.items():

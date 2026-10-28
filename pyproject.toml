@@ -3,9 +3,13 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gesture-controller"
+# The distribution name follows the product rename; the console script below
+# keeps the old entry point so existing shell aliases keep working.
+name = "pinchcursor"
 version = "0.2.0"
-description = "macOS-first desktop hand gesture controller"
+description = "Touchless pointer control for macOS: hand tracking to cursor, clicks and scrolling"
+readme = "README.md"
+license = "AGPL-3.0-only"
 requires-python = ">=3.13,<3.14"
 dependencies = [
   "PySide6==6.12.0",
@@ -29,6 +33,8 @@ test = [
 macos-build = ["pyinstaller==6.22.3"]
 
 [project.scripts]
+# New name, plus the pre-rename entry point so existing aliases keep working.
+pinchcursor = "main:main"
 gesture-control = "main:main"
 
 [tool.setuptools]
@@ -40,6 +46,7 @@ exclude = ["tests*", "data*", "models*", "assets*"]
 
 [tool.setuptools.package-data]
 core = ["models/*.task"]
+gui = ["resources/*.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

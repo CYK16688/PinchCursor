@@ -32,6 +32,9 @@ class UnavailableInputController:
     def release_drag(self) -> ActionResult:
         return ActionResult(executed=True)
 
+    def cursor_position(self) -> tuple[float, float] | None:
+        return None
+
 
 class GenericUIContextProvider:
     def __init__(self, policy: ContextPolicy | None = None, source: str = "generic"):

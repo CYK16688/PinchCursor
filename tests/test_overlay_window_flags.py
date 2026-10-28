@@ -64,7 +64,6 @@ def test_overlay_maps_every_hud_state_to_a_consistent_outline_icon():
             "clicked": "pinch",
             "dragging": "grab",
             "secondary_click": "peace",
-            "volume": "thumb_volume",
         }
 
         for state, icon_name in expected.items():

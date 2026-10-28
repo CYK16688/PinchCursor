@@ -13,10 +13,31 @@ heading, a gesture identity, a button verb.
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 
 from PySide6.QtCore import QByteArray, QRectF, Qt
-from PySide6.QtGui import QIcon, QPainter, QPixmap
+from PySide6.QtGui import QGuiApplication, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
+from core.resource_paths import resource_root
+
+
+def _device_pixel_ratio() -> float:
+    """The ratio to rasterise at, so glyphs are sharp on a Retina display.
+
+    Rendering at ratio 1 and letting Qt upscale made every icon, the app mark and
+    the preview placeholder look soft next to 13 px text — on a product that only
+    ships for macOS, where essentially every display is HiDPI.
+    """
+    application = QGuiApplication.instance()
+    if application is None:
+        return 1.0
+    screen = application.primaryScreen()
+    if screen is None:
+        return 1.0
+    try:
+        return max(1.0, float(screen.devicePixelRatio()))
+    except (TypeError, ValueError):
+        return 1.0
 
 _VIEWBOX = 24
 _STROKE = 1.8
@@ -115,26 +136,34 @@ def available() -> tuple[str, ...]:
     return tuple(sorted({*_STROKED, *_FILLED}))
 
 
-def pixmap(name: str, color: str = "#8B93A1", size: int = 16) -> QPixmap:
-    """Render one icon at the requested pixel size (HiDPI-aware)."""
+def pixmap(name: str, color: str = "#8B93A1", size: int = 16, ratio: float | None = None) -> QPixmap:
+    """Render one icon at ``size`` logical pixels, including its device ratio."""
+    ratio = _device_pixel_ratio() if ratio is None else max(1.0, float(ratio))
     renderer = QSvgRenderer(QByteArray(_svg(name, color).encode("utf-8")))
-    pixmap = QPixmap(size, size)
+    device_pixels = max(1, round(size * ratio))
+    pixmap = QPixmap(device_pixels, device_pixels)
     pixmap.fill(Qt.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing, True)
-    renderer.render(painter, QRectF(0, 0, size, size))
+    renderer.render(painter, QRectF(0, 0, device_pixels, device_pixels))
     painter.end()
+    # Qt then draws it at `size` logical pixels with the extra detail.
+    pixmap.setDevicePixelRatio(ratio)
     return pixmap
 
 
-def padded_pixmap(name: str, color: str, size: int, extra_right: int) -> QPixmap:
+def padded_pixmap(name: str, color: str, size: int, extra_right: int, ratio: float | None = None) -> QPixmap:
     """Glyph plus transparent space, so list text is not glued to the icon."""
-    base = pixmap(name, color, size)
-    padded = QPixmap(size + extra_right, size)
+    ratio = _device_pixel_ratio() if ratio is None else max(1.0, float(ratio))
+    base = pixmap(name, color, size, ratio=ratio)
+    width = max(1, round((size + extra_right) * ratio))
+    height = max(1, round(size * ratio))
+    padded = QPixmap(width, height)
     padded.fill(Qt.transparent)
     painter = QPainter(padded)
     painter.drawPixmap(0, 0, base)
     painter.end()
+    padded.setDevicePixelRatio(ratio)
     return padded
 
 
@@ -142,59 +171,34 @@ def icon(name: str, color: str = "#8B93A1", size: int = 16) -> QIcon:
     return QIcon(pixmap(name, color, size))
 
 
-APP_MARK_VIEWBOX = 1024
+def app_mark_path():
+    """One shipped source for the header, window icon and platform exports."""
+    return resource_root() / "gui" / "resources" / "pinchcursor.png"
 
 
-def app_mark_svg(hand_color: str = "#FFFFFF", tile_color: str = "#5E8CFF") -> str:
-    """The product mark: a pointer emerging through a lock ring, on a tile.
-
-    The ring is the same shape the HUD shows at the moment a target locks, and
-    the break in it sits exactly where the pointer points, so the mark reads as
-    "aim, then lock" instead of as another cursor glyph. ``hand_color`` keeps its
-    historical name so callers and the icon script stay unchanged.
-
-    Shared by the in-app header, the window icon, and the .icns the bundle ships
-    so the Dock, the header and the About panel cannot drift apart.
-    """
-    # Classic pointer silhouette, authored in a unit box with the tip at 0,0.
-    pointer = "M0 0 L0 15 L4 11 L6.6 16.4 L9.4 15.2 L6.8 9.9 L11.6 9.9 Z"
-    # Ring: r=250 around (470,470) with a 64 degree gap facing the pointer tip
-    # at 225 degrees. Two round-capped arcs are clearer than a dashed circle.
-    ring = "M413.8 226.4 A250 250 0 1 1 226.4 413.8"
-    return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" '
-        f'viewBox="0 0 {APP_MARK_VIEWBOX} {APP_MARK_VIEWBOX}">'
-        f'<defs>'
-        f'<linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">'
-        f'<stop offset="0" stop-color="#5E8CFF"/>'
-        f'<stop offset="1" stop-color="{tile_color}"/>'
-        f'</linearGradient>'
-        f'</defs>'
-        f'<rect width="{APP_MARK_VIEWBOX}" height="{APP_MARK_VIEWBOX}" '
-        f'rx="228" fill="url(#tile)"/>'
-        f'<path d="{ring}" fill="none" stroke="{hand_color}" '
-        f'stroke-width="34" stroke-linecap="round" opacity="0.72"/>'
-        f'<g transform="translate(360 280) scale(24)" fill="{hand_color}">'
-        f'<path d="{pointer}"/></g>'
-        f'</svg>'
-    )
+@lru_cache(maxsize=1)
+def _app_mark_image(path: str) -> QImage:
+    image = QImage(path)
+    if image.isNull():
+        raise FileNotFoundError(f"Missing or invalid application mark: {path}")
+    return image
 
 
 def app_icon() -> QIcon:
-    """Multi-resolution window/Dock icon built from the same mark."""
+    """Multi-resolution window/Dock icon built from the canonical mark."""
     icon = QIcon()
-    for size in (16, 32, 64, 128, 256, 512):
-        icon.addPixmap(app_mark(size))
+    for size in (16, 32, 64, 128, 256, 512, 1024):
+        icon.addPixmap(app_mark(size, ratio=1.0))
     return icon
 
 
-def app_mark(size: int = 26, hand_color: str = "#FFFFFF") -> QPixmap:
-    """Rasterise the product mark at the requested size."""
-    renderer = QSvgRenderer(QByteArray(app_mark_svg(hand_color).encode("utf-8")))
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing, True)
-    renderer.render(painter, QRectF(0, 0, size, size))
-    painter.end()
+def app_mark(size: int = 26, ratio: float | None = None) -> QPixmap:
+    """Scale the fixed-color product identity at the display's pixel ratio."""
+    ratio = _device_pixel_ratio() if ratio is None else max(1.0, float(ratio))
+    pixels = max(1, round(size * ratio))
+    image = _app_mark_image(str(app_mark_path())).scaled(
+        pixels, pixels, Qt.KeepAspectRatio, Qt.SmoothTransformation,
+    )
+    pixmap = QPixmap.fromImage(image)
+    pixmap.setDevicePixelRatio(ratio)
     return pixmap

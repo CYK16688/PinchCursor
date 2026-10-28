@@ -38,6 +38,7 @@ from __future__ import annotations
 import ctypes
 import sys
 
+from platform_services.contracts import normalize_cursor_position
 from utils.windows_hotkey_validation import normalize_windows_hotkey
 
 # --- SendInput layout -------------------------------------------------------
@@ -235,6 +236,8 @@ class WindowsApiBinding:
         user32.SendInput.restype = DWORD
         user32.GetAsyncKeyState.argtypes = (ctypes.c_int,)
         user32.GetAsyncKeyState.restype = ctypes.c_short
+        user32.GetCursorPos.argtypes = (ctypes.POINTER(POINT),)
+        user32.GetCursorPos.restype = ctypes.c_int32
         user32.GetSystemMetrics.argtypes = (ctypes.c_int,)
         user32.GetSystemMetrics.restype = ctypes.c_int
         user32.WindowFromPoint.argtypes = (POINT,)
@@ -251,6 +254,15 @@ class WindowsApiBinding:
 
     def async_key_state(self, virtual_key: int) -> int:
         return int(self._user32.GetAsyncKeyState(int(virtual_key)))
+
+    def cursor_position(self) -> tuple[float, float] | None:
+        point = POINT()
+        try:
+            if not self._user32.GetCursorPos(ctypes.byref(point)):
+                return None
+            return float(point.x), float(point.y)
+        except Exception:
+            return None
 
     def virtual_screen_bounds(self) -> tuple[int, int, int, int]:
         metrics = self._user32.GetSystemMetrics
@@ -289,6 +301,14 @@ class WindowsNativeFacade:
         return dict(WINDOWS_MODIFIER_KEYCODES)
 
     # --- pointer input ----------------------------------------------------
+
+    def cursor_position(self) -> tuple[float, float] | None:
+        """Read the OS pointer using the calling thread's screen coordinate space."""
+        try:
+            getter = getattr(self.binding, "cursor_position", None)
+            return normalize_cursor_position(getter()) if callable(getter) else None
+        except Exception:
+            return None
 
     def move_to(self, x: int, y: int) -> None:
         self._send([self._absolute_move(x, y)])

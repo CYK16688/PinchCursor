@@ -25,6 +25,7 @@ class ScrollableContext:
 
 def _window_with_scrollable_target(tmp_path, monkeypatch):
     config = ConfigManager(config_path=tmp_path / "settings.json")
+    config.set("pointer_scroll", "enabled", False)
     monkeypatch.setattr(main_window, "ConfigManager", lambda: config)
     window = main_window.MainWindow()
     window.control_session.state = window.control_session.state.POINTER
@@ -79,7 +80,7 @@ def test_scroll_target_requires_a_point_candidate_before_thumb_dispatch(tmp_path
         window.execute_action("thumb_down", (100, 100), (480, 640, 3))
 
         assert requests[-1].action == "scroll_down"
-        assert window.hud.message == "Scroll down"
+        assert window.hud.message == window._action_label("scroll_down")
     finally:
         window.close()
 

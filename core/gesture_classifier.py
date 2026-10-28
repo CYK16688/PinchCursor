@@ -254,6 +254,13 @@ class GestureClassifier:
         self.last_pinch_time = None
         self.double_tap_threshold = 0.35  # 双击时间窗口
         self.was_pinching = False
+        # Set on the frame the pinch physically opens. The hysteresis band
+        # (enter 0.29, exit 0.42) already makes that a decisive signal, so the
+        # stabiliser may leave the pinch immediately instead of also waiting out
+        # exit_threshold frames of a different label.
+        self._pinch_release_streak = 0
+        self._release_measure = None
+        self._release_threshold = None
 
         # 捏合预测 - 通过监测距离变化速度
         self.pinch_dist_history = []  # 捏合距离历史
@@ -415,9 +422,21 @@ class GestureClassifier:
 
         if is_pinching:
             self.in_pinch_state = True
+            # Any pinch frame restarts the release evidence from zero.
+            self._pinch_release_streak = 0
+            self._release_measure = None
             return self._handle_pinch(now)
 
-        # 捏合释放时重置状态
+        # Not pinching: accumulate how long the hand has been open, and how far
+        # past the exit threshold it went. The stabiliser needs both to decide
+        # whether this is a deliberate release or a noisy frame.
+        self._pinch_release_streak += 1
+        self._release_measure = pinch_measure
+        self._release_threshold = exit_threshold
+
+        # 捏合释放时重置状态。The release evidence above (`_pinch_release_streak`
+        # and `_release_measure`) is what lets the stabiliser end a pinch without
+        # waiting for exit_threshold frames of a different label.
         if self.was_pinching:
             self._on_pinch_release(now)
 
@@ -562,7 +581,12 @@ class GestureClassifier:
             self.pinch_time_history.clear()
             self.last_pinch_dist = None
             self.pinch_velocity = 0
-            return {'distance': 999, 'velocity': 0, 'is_approaching': False}
+            return {
+            'distance': 999,
+            'velocity': 0,
+            'is_approaching': False,
+            'is_pinching': False,
+        }
 
         now = self._clock() if timestamp is None else timestamp
         dist = self._get_pinch_distance(landmarks)
@@ -593,7 +617,12 @@ class GestureClassifier:
         return {
             'distance': dist,
             'velocity': velocity,
-            'is_approaching': is_approaching
+            'is_approaching': is_approaching,
+            # Raw, hysteresis-backed pinch state. It flips on the frame the
+            # fingers actually close, two or three frames before the stabiliser
+            # confirms the label, which is what lets the pointer stop tracking
+            # at the moment of the pinch instead of after it.
+            'is_pinching': bool(self.in_pinch_state),
         }
 
     def _handle_pinch(self, now):
@@ -626,9 +655,51 @@ class GestureClassifier:
         now = self._clock() if timestamp is None else timestamp
         return now - self.last_pinch_time < self.double_tap_threshold
 
+    # A release must overshoot the exit threshold by this factor to skip the
+    # confirmation frames. Below it the opening is ambiguous.
+    RELEASE_MARGIN = 1.15
+    # Consecutive release frames before the fast path is allowed.
+    RELEASE_CONFIRM_FRAMES = 2
+
+    def _release_decisive(self) -> bool:
+        """True when the pinch opened far enough past the exit threshold."""
+        measure = self._release_measure
+        threshold = self._release_threshold
+        if measure is None or threshold is None:
+            return False
+        try:
+            return float(measure) >= float(threshold) * self.RELEASE_MARGIN
+        except (TypeError, ValueError):
+            return False
+
     def _stabilize_gesture(self, raw_gesture, timestamp=None):
         """Stabilize raw labels against a monotonic frame timestamp."""
         now = self._clock() if timestamp is None else timestamp
+
+        # A pinch that physically opened may leave immediately. Waiting for
+        # exit_threshold frames of a different *label* on top of the pinch's own
+        # hysteresis made two clicks need 233 ms of release, which ruled out any
+        # quick repeat. Entry is untouched: re-pinching still needs
+        # confirm_threshold frames, and the enter threshold is stricter than the
+        # exit one, so the label cannot oscillate.
+        decisive = (
+            self._pinch_release_streak >= self.RELEASE_CONFIRM_FRAMES
+            and self._release_decisive()
+        )
+        if (
+            decisive
+            and self.current_stable_gesture in {"pinch", "pinch_hold"}
+            and raw_gesture != self.current_stable_gesture
+        ):
+            self.current_stable_gesture = raw_gesture
+            # Clear the switch clock rather than stamping it. The cooldown exists
+            # to stop the label bouncing immediately after a switch, but a
+            # physical release already proves the previous gesture is finished,
+            # and stamping `now` would then demand exit_threshold + 1 frames to
+            # re-enter — the very delay this change is meant to remove.
+            self.gesture_switch_time = None
+            self.consecutive_count = 1
+            return self.current_stable_gesture
 
         # 更新连续计数
         if raw_gesture == self.last_raw_gesture:

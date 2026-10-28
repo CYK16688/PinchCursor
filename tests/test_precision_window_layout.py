@@ -82,7 +82,10 @@ def test_precision_main_window_has_one_primary_control_and_no_training_button(mo
     try:
         assert window.primary_control_button.text() == "授予辅助功能权限"
         assert window.session_card.objectName() == "sessionCard"
-        assert window.minimumWidth() >= 1200
+        # The floor is what the layout actually needs (960x597). The previous
+        # 1200 was also the only size the window could ever open at.
+        assert window.minimumWidth() >= 1000
+        assert window.minimumWidth() < 1200, "the window must be shrinkable on a 13-inch display"
         assert not hasattr(window, "collect_btn")
     finally:
         window.close()
@@ -126,9 +129,11 @@ def test_precision_console_has_change_actions_for_configuration_summaries(monkey
         # so there is no separate "更改" button to count.
         opened = []
         monkeypatch.setattr(window, "open_settings", lambda section_id=None: opened.append(section_id))
-        for name in ("activation", "camera", "permissions"):
+        for name in ("pointer", "activation", "camera"):
             window.summary_rows[name].clicked.emit()
-        assert opened == ["control", "camera", "permissions"]
+        # Permissions are an inline blocking indicator, not a destination: the
+        # rows open the exact settings tab for the fact being changed.
+        assert opened == ["pointer", "activation", "camera"]
         assert window.camera_summary.text() == "请在设置中选择摄像头"
     finally:
         window.close()
@@ -175,7 +180,9 @@ def test_main_window_localizes_camera_denial_and_hold_shortcut_status(monkeypatc
         set_locale("en_US")
 
         window._on_camera_permission_result(False)
-        assert window.status_indicator.text() == "● Camera access was not granted"
+        # The state bullet is a themed dot now, not a glyph baked into the text.
+        assert window.status_indicator.text() == "Camera access was not granted"
+        assert window.state_dot.property("semantic") == "denied"
 
         window.is_running = True
         window._start_video_worker = lambda: True

@@ -22,6 +22,7 @@ datas = [
     # QSS draws the combo-box chevron from a real image file (Qt has no
     # `transform`), so the icons must ship next to the executable.
     ("assets/icons", "assets/icons"),
+    ("gui/resources/pinchcursor.png", "gui/resources"),
 ]
 binaries = []
 hiddenimports = []
@@ -105,6 +106,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=f"{SPECPATH}/assets/app.ico" if sys.platform == "win32" else None,
 )
 
 coll = COLLECT(

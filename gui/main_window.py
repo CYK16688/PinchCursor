@@ -4,8 +4,10 @@ import cv2
 import os
 import platform
 import time
+import traceback
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from copy import deepcopy
 from math import isfinite
 from numbers import Real
 from PySide6.QtWidgets import (
@@ -13,7 +15,7 @@ from PySide6.QtWidgets import (
     QApplication, QPushButton, QLabel, QFrame, QSizePolicy, QStackedLayout
 )
 from PySide6.QtCore import QSize, Qt, QTimer, QRect, QRectF, Signal
-from PySide6.QtGui import QCursor, QImage, QPixmap, QPainter
+from PySide6.QtGui import QCursor, QImage, QKeySequence, QPixmap, QPainter, QShortcut
 
 from core.base_detector import BaseHandDetector
 from core.detector_factory import create_detector
@@ -32,8 +34,12 @@ from core.pointer_mapping import AbsoluteMapper, RelativeMapper, ScreenBounds
 from core.telemetry import TelemetryStore, default_path
 from core.combo_detector import ComboDetector
 from core.intent_arbiter import IntentArbiter, IntentDecision
+from core.input_guard import frame_is_fresh
 
 from core.control_session import ActivationMode, ControlSession, SessionState
+from core.control_engine import ControlEngine, HandObservation
+from core.control_runtime import ControlRuntime
+from core.async_services import AsyncContextProvider, AsyncTelemetry
 from core.mediapipe_worker import LandmarkFrame, MediaPipeVideoWorker
 from core.static_gesture_template import StaticGestureMatcher, StaticGestureTemplate
 from core.dynamic_gesture_template import DynamicGestureMatcher, DynamicGestureTemplate
@@ -44,15 +50,42 @@ from platform_services.contracts import ActionRequest
 from platform_services.factory import create_platform_services
 from platform_services.policy import ContextPolicy
 from utils.camera_utils import open_camera
-from utils.smoothing import CursorSmoother
+from utils.smoothing import (
+    CURSOR_SMOOTHING_BETA,
+    DEFAULT_DEAD_ZONE,
+    CursorSmoother,
+    mincutoff_for_smoothing,
+)
 from utils.tracker import TargetTracker
-from utils.config_manager import ConfigManager
+from utils.config_manager import ConfigManager, last_load_error
 from gui import icons
+from gui.gesture_icons_svg import GestureIconsSVG
 from gui.theme import DARK_THEME, use_styled_background
 from gui.overlay import GestureOverlay
 from gui.summary_row import SummaryRow
 from gui.hud_state import HudController, HudState
+from gui.interaction_feedback import InteractionFeedbackPresenter, interaction_feedback_model
+from gui.interaction_panel import InteractionPanel
+from gui.gesture_guide import GestureGuide
 from gui.i18n import set_locale, tr
+
+
+# A capture backend can block in read(). Keep its QThread alive until it exits,
+# even when the owning window closes; deleting a running QThread aborts Qt.
+_RETIRING_VIDEO_WORKERS = set()
+
+
+def _hand_observation(landmark_frame, shortcut_held=False):
+    timestamp_ms = getattr(landmark_frame, "timestamp_ms", None)
+    if timestamp_ms is None:
+        timestamp = time.monotonic()
+    elif isinstance(timestamp_ms, Real) and not isinstance(timestamp_ms, bool):
+        timestamp = timestamp_ms / 1000.0
+    else:
+        timestamp = float("nan")
+    shape = getattr(landmark_frame.frame, "shape", ())
+    size = (shape[1], shape[0]) if len(shape) >= 2 else (0, 0)
+    return HandObservation(timestamp, landmark_frame.landmarks, size, shortcut_held)
 
 
 @dataclass(frozen=True)
@@ -175,6 +208,7 @@ class MainWindow(QMainWindow):
         "main.camera_open_failed": "main.camera_open_failed",
         "main.hold_shortcut_unavailable": "main.hold_shortcut_unavailable",
         "main.starting_camera": "main.starting_camera",
+        "main.settings_recovered": "main.settings_recovered",
     }
 
     @classmethod
@@ -195,18 +229,18 @@ class MainWindow(QMainWindow):
         # light Fusion palette shows through every gap between cards.
         use_styled_background(self)
         self.config = ConfigManager()
+        # A settings file that could not be parsed is now backed up rather than
+        # silently replaced by defaults; say so, or the user just finds their
+        # calibration and recorded takes missing with no explanation.
+        self._settings_load_failure = last_load_error()
         # Presentation locale is restored before any user-visible widgets are created.
         set_locale(self.config.get("ui", "language"))
         self.init_components()
         self.init_ui()
         self.init_camera()
-
-    def _cache_cameras(self):
-        """在启动时缓存摄像头列表，避免后续检测冲突"""
-        from gui.settings_dialog import SettingsDialog
-        from utils.camera_utils import detect_cameras
-        if SettingsDialog._cached_cameras is None:
-            SettingsDialog._cached_cameras = detect_cameras()
+        if self._settings_load_failure:
+            self._status_override_key = "main.settings_recovered"
+            self._refresh_precision_console()
 
     def init_components(self):
         """初始化核心组件"""
@@ -219,6 +253,12 @@ class MainWindow(QMainWindow):
         self.tracking_confidence = track_conf
         self.detector = None
         self.video_worker = None
+        self.control_runtime = None
+        self._runtime_guard = None
+        self._runtime_context = None
+        self._runtime_telemetry = None
+        self._control_snapshot = None
+        self._synchronous_engine = None
         self.classifier = GestureClassifier()
         self.platform_services = self._create_platform_services_from_config()
         self.action_coordinator = GestureActionCoordinator(self.platform_services)
@@ -234,6 +274,7 @@ class MainWindow(QMainWindow):
         self.screen_w, self.screen_h = self.screen_bounds.width, self.screen_bounds.height
         self.pointer_mapper = AbsoluteMapper()
         self._pointer_anchor_pending = True
+        self._last_frame_time = float("-inf")
 
         self.smoother = CursorSmoother()
 
@@ -245,6 +286,11 @@ class MainWindow(QMainWindow):
         # 初始化动作状态机
         self.preset = preset_for("standard")
         self.action_machine = ActionStateMachine()
+        # Screen position captured on the frame a pinch physically closes, held
+        # until it opens again. The label takes a few frames to confirm; without
+        # this the pointer keeps following the hand through that window.
+        self._pinch_freeze_pos = None
+        self._scroll_anchor = None
         self._refresh_runtime_configuration()
         self.intent_arbiter = IntentArbiter()
         self.dynamic_intent_lifecycle = DynamicIntentLifecycle()
@@ -285,6 +331,7 @@ class MainWindow(QMainWindow):
         self.hud_anchor = None
         self.hud_timer = QTimer(self)
         self.hud_timer.setInterval(50)
+        self.hud_timer.timeout.connect(self._drain_control_runtime)
         self.hud_timer.timeout.connect(self._render_hud)
         self.hud_timer.start()
 
@@ -300,10 +347,15 @@ class MainWindow(QMainWindow):
         # 节能模式参数
         self.no_hand_frames = 0  # 连续无手帧数
         self.power_mode = "normal"  # normal, low, sleep, deep_sleep
-        self.NORMAL_INTERVAL = 16  # ~60fps
-        self.LOW_INTERVAL = 66     # ~15fps
-        self.SLEEP_INTERVAL = 200  # ~5fps
-        self.DEEP_SLEEP_INTERVAL = 500  # ~2fps (仅红外检测)
+        # Seconds between inference passes per mode. "normal" is unthrottled so
+        # an active hand keeps its full frame rate; the deeper modes trade
+        # wake-up latency for power while nothing is being tracked.
+        self._POWER_FRAME_INTERVALS = {
+            "normal": 0.0,
+            "low": 1.0 / 15.0,
+            "sleep": 1.0 / 5.0,
+            "deep_sleep": 1.0 / 2.0,
+        }
         self.LOW_THRESHOLD = 30    # 30帧无手进入低功耗
         self.SLEEP_THRESHOLD = 150 # 150帧无手进入休眠
         self.DEEP_SLEEP_THRESHOLD = 300  # 300帧无手进入深度休眠
@@ -320,6 +372,8 @@ class MainWindow(QMainWindow):
 
     def _refresh_runtime_configuration(self):
         """Apply saved runtime policy to the live deterministic control lane."""
+        if not self._stop_control_runtime():
+            raise RuntimeError("Control runtime is still stopping")
         detection = self.config.get("detection") or {}
         self.detector_type = "mediapipe"
         self.detection_confidence = detection.get("confidence", 0.7)
@@ -334,9 +388,22 @@ class MainWindow(QMainWindow):
             self.tracking_confidence = self.preset.tracking_confidence
 
         sensitivity = self.config.get("global_sensitivity") or {}
+        # The persisted "smoothing" preference governs resting jitter, which is
+        # the 1€ filter's ``mincutoff``; it used to be fed to ``beta`` (the
+        # high-speed term), so the dial did nothing useful to a still hand. The
+        # active profile supplies the baseline and the preference scales around
+        # it, which keeps each profile's intent while making the dial real.
+        # ``beta`` stays fixed: it is what keeps a deliberate move responsive,
+        # and exposing it is what caused the original confusion.
         self.smoother = CursorSmoother(
-            mincutoff=self.preset.smoothing_mincutoff,
-            beta=sensitivity.get("smoothing", 0.005),
+            mincutoff=mincutoff_for_smoothing(
+                sensitivity.get("smoothing"),
+                default=self.preset.smoothing_mincutoff,
+            ),
+            beta=CURSOR_SMOOTHING_BETA,
+            # Filtering cannot remove the jitter of a still hand without also
+            # smearing a deliberate small move; the dead zone removes it outright.
+            dead_zone=sensitivity.get("dead_zone", DEFAULT_DEAD_ZONE),
         )
 
         pinch_cfg = self.config.get_gesture("pinch")
@@ -408,14 +475,15 @@ class MainWindow(QMainWindow):
         """Map one hand position to screen points, anchoring relative mode."""
         pending = getattr(self, "_pointer_anchor_pending", False)
         if pending and isinstance(self.pointer_mapper, RelativeMapper):
-            # Anchor on the cursor this app last drove, not on a native
-            # round-trip that may still be a frame behind.
-            cursor = getattr(self, "_last_cursor_pos", None) or (QCursor.pos().x(), QCursor.pos().y())
+            # A physical mouse may have moved during the pause. Reacquire the
+            # actual pointer rather than our last unfiltered mapping result.
+            current = QCursor.pos()
+            cursor = (current.x(), current.y())
             self.pointer_mapper.begin(pos, frame_size, self.screen_bounds, cursor=cursor)
+            if hasattr(self, "smoother"):
+                self.smoother.reset()
         self._pointer_anchor_pending = False
         mapped = self.pointer_mapper.map(pos, frame_size, self.screen_bounds)
-        if mapped is not None:
-            self._last_cursor_pos = mapped
         return mapped
 
     def _refresh_telemetry(self):
@@ -923,6 +991,8 @@ class MainWindow(QMainWindow):
 
     def _dispatch_completed_dynamic_shortcut(self, completed_frames, anchor, *, now):
         """Match and dispatch one lifecycle-completed optional semantic motion."""
+        if getattr(self, "control_runtime", None) is not None:
+            raise RuntimeError("Live dynamic gestures are owned by the control runtime")
         dynamic = self.config.get("dynamic_gestures") or {}
         if (
             self.dynamic_runtime_matcher is None
@@ -1027,6 +1097,9 @@ class MainWindow(QMainWindow):
 
     def _reset_gesture_observation_state(self):
         """Clear optional command candidates at a safety boundary."""
+        replay_engine = getattr(self, "_synchronous_engine", None)
+        if replay_engine is not None:
+            ControlEngine._reset_gesture_observation_state(replay_engine)
         self.contextual_intent_controller.reset()
         self._clear_dynamic_shortcut_observation()
         combo_detector = getattr(self, "combo_detector", None)
@@ -1035,12 +1108,20 @@ class MainWindow(QMainWindow):
         arbiter = getattr(self, "intent_arbiter", None)
         if arbiter is not None:
             arbiter.reset()
+        self._pinch_freeze_pos = None
+        self._scroll_anchor = None
+        self._context_cache = None
+        self._pointer_anchor_pending = True
+        self._last_cursor_pos = None
 
     def init_ui(self):
         """Initialize the Precision Desk operational console."""
-        # 640px preview + session panel must fit without squeezing either at the
-        # documented desktop minimum size.
-        self.setMinimumSize(1200, 640)
+        # The old minimum was also the only size the window ever opened at, so
+        # every user got exactly 1200x640 and could never shrink it, although the
+        # layout only needs 960x597. Keep a floor the layout really needs, open a
+        # little roomier, and remember the frame between launches.
+        self.setMinimumSize(1000, 660)
+        self.resize(1200, 760)
         # Combo popup views are top-level native windows on macOS, so a window-
         # local stylesheet leaves their unselected rows to the system palette.
         # Install the single app theme instead so every interactive popup uses
@@ -1050,8 +1131,8 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        layout.setContentsMargins(28, 24, 28, 28)
-        layout.setSpacing(20)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(16)
 
         header = QHBoxLayout()
         header.setSpacing(10)
@@ -1070,15 +1151,24 @@ class MainWindow(QMainWindow):
         self.settings_btn.setObjectName("quietButton")
         self.settings_btn.setIcon(icons.icon("gear", "#C6CBD5", 15))
         self.settings_btn.setIconSize(QSize(15, 15))
+        # ⌘, opens preferences in every Mac app; leaving the only settings entry
+        # point mouse-only breaks the platform convention and keyboard navigation.
+        self.settings_btn.setShortcut(QKeySequence.StandardKey.Preferences)
+        self.settings_btn.setToolTip(tr("main.settings_shortcut_hint"))
         self.settings_btn.clicked.connect(lambda _checked=False: self.open_settings())
         header.addLayout(title_layout)
         header.addStretch()
-        header.addWidget(self.status_chip)
+        # Session state has one visible home, beside Start/Stop. Keep the
+        # compatibility label populated without repeating it in the header.
+        self.status_chip.hide()
         header.addWidget(self.settings_btn)
         layout.addLayout(header)
 
         content = QHBoxLayout()
-        content.setSpacing(20)
+        content.setSpacing(16)
+        left_column = QVBoxLayout()
+        left_column.setSpacing(12)
+        content.addLayout(left_column, 3)
 
         preview_frame = QFrame()
         preview_frame.setObjectName("previewFrame")
@@ -1090,56 +1180,87 @@ class MainWindow(QMainWindow):
         preview_layout.addWidget(self.preview_title)
         self.video_label = QLabel()
         self.video_label.setAlignment(Qt.AlignCenter)
-        self.video_label.setMinimumSize(640, 400)
-        self.video_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # 640x400 is the camera's own resolution, which is a floor for the
+        # widget, not a cap: the well should fill whatever space the card has.
+        self.video_label.setMinimumSize(320, 240)
+        self.video_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.video_label.setObjectName("videoViewport")
         self.preview_stack = QStackedLayout()
         self.preview_stack.addWidget(self.video_label)
         self.preview_stack.addWidget(self._build_preview_placeholder())
+        # Give the stack a real minimum so the well fills the card instead of
+        # collapsing to the idle page's sizeHint.
+        self.preview_stack.setContentsMargins(0, 0, 0, 0)
         preview_holder = QWidget()
         preview_holder.setLayout(self.preview_stack)
+        # StackOne paints only the active page; the holder still has to expand,
+        # or it collapses to the page's sizeHint and leaves a dead band under
+        # the video.
+        preview_holder.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         preview_layout.addWidget(preview_holder, 1)
+        # The footer answers "is it live?" — it belongs directly under the well,
+        # not pinned to the bottom of a card several hundred pixels tall.
+        footer = QHBoxLayout()
+        footer.setSpacing(8)
+        self.preview_status_dot = QLabel()
+        self.preview_status_dot.setObjectName("stateDot")
+        self.preview_status_dot.setFixedSize(7, 7)
         self.gesture_label = QLabel()
         self.gesture_label.setObjectName("previewStatus")
-        preview_layout.addWidget(self.gesture_label)
-        content.addWidget(preview_frame, 3)
+        footer.addWidget(self.preview_status_dot)
+        footer.addWidget(self.gesture_label, 1)
+        preview_layout.addLayout(footer)
+        left_column.addWidget(preview_frame, 1)
 
         self.session_card = QFrame()
         self.session_card.setObjectName("sessionCard")
         session_layout = QVBoxLayout(self.session_card)
-        session_layout.setContentsMargins(20, 18, 20, 18)
-        session_layout.setSpacing(14)
-        self.session_title = QLabel()
-        self.session_title.setObjectName("eyebrow")
-        session_layout.addWidget(self.session_title)
+        self.session_card.setMinimumWidth(300)
+        self.session_card.setMaximumWidth(360)
+        session_layout.setContentsMargins(20, 20, 20, 20)
+        session_layout.setSpacing(12)
+
+        # ── block 1: state + primary action ──────────────────────────────────
+        # The button is the reason this window exists, so it leads. It used to
+        # sit below two summary rows and a conditional permission block, roughly
+        # 300 px down the card, while a 640x400 mostly-empty preview owned 60 %
+        # of the width.
+        state_row = QHBoxLayout()
+        state_row.setSpacing(10)
+        self.state_dot = QLabel()
+        self.state_dot.setObjectName("stateDot")
+        self.state_dot.setFixedSize(9, 9)
         self.status_indicator = QLabel()
         self.status_indicator.setObjectName("sessionState")
-        session_layout.addWidget(self.status_indicator)
+        state_row.addWidget(self.state_dot)
+        state_row.addWidget(self.status_indicator, 1)
+        session_layout.addLayout(state_row)
 
-        self.activation_summary = QLabel()
-        self.camera_summary = QLabel()
-        self.summary_heading_labels = {}
-        self.summary_rows = {}
-        for key, name, value, section_id, glyph in (
-            ("main.activation", "activation", self.activation_summary, "control", "bolt"),
-            ("main.camera", "camera", self.camera_summary, "camera", "camera"),
-        ):
-            row, row_layout = self._build_summary_row(key, section_id, glyph)
-            value.setObjectName("summaryValue")
-            value.setWordWrap(True)
-            row_layout.addWidget(value)
-            self.summary_rows[name] = row
-            session_layout.addWidget(row)
+        self.session_hint = QLabel()
+        self.session_hint.setObjectName("sessionHint")
+        self.session_hint.setWordWrap(True)
+        session_layout.addWidget(self.session_hint)
 
-        # Permissions are two independent facts, and they only belong on this
-        # screen when one of them is blocking. Two "granted" lines are noise for
-        # an operator who just needs to press Start.
+        self.primary_control_button = QPushButton()
+        self.primary_control_button.setObjectName("primaryControlButton")
+        self.primary_control_button.setMinimumHeight(48)
+        # Return is the expected way to confirm the one primary action, and a
+        # default button is also what keeps the window keyboard-operable at all.
+        self.primary_control_button.setAutoDefault(True)
+        self.primary_control_button.setDefault(True)
+        self.primary_control_button.clicked.connect(self._perform_primary_action)
+        self.stop_shortcut = QShortcut(QKeySequence(Qt.Key_Escape), self)
+        self.stop_shortcut.activated.connect(self._stop_from_keyboard)
+        session_layout.addWidget(self.primary_control_button)
+
+        # Permissions only occupy space when one of them is blocking; two
+        # "granted" lines are noise for someone who just needs to press Start.
         self.permission_rows = {}
-        self.permission_row, permission_layout = self._build_summary_row(
-            "main.permissions", "permissions", "shield"
-        )
-        self.permission_row.setVisible(False)
-        self.summary_rows["permissions"] = self.permission_row
+        self.permission_row = QFrame()
+        self.permission_row.setObjectName("permissionBlock")
+        permission_layout = QVBoxLayout(self.permission_row)
+        permission_layout.setContentsMargins(0, 4, 0, 0)
+        permission_layout.setSpacing(8)
         for permission_key in ("camera", "accessibility"):
             permission_line = QHBoxLayout()
             permission_line.setSpacing(8)
@@ -1155,46 +1276,157 @@ class MainWindow(QMainWindow):
             permission_line.addWidget(value)
             permission_layout.addLayout(permission_line)
             self.permission_rows[permission_key] = (dot, name, value)
+        self.permission_row.setVisible(False)
         session_layout.addWidget(self.permission_row)
 
-        # The last-action answer only exists once something has run. Showing an
-        # empty block at idle spends a fifth of the card on "nothing yet".
+        self.interaction_panel = InteractionPanel()
+        self.interaction_presenter = InteractionFeedbackPresenter()
+        session_layout.addWidget(self.interaction_panel)
+
+        self.gesture_reference = GestureGuide()
+        self.gesture_reference.configure_requested.connect(lambda: self.open_settings("gestures"))
+        self.gesture_reference_title = self.gesture_reference.title
+        self.gesture_reference_hint = self.gesture_reference.hint
+        self.gesture_rows_container = self.gesture_reference.grid
+        self.gesture_rows = {}
+        left_column.addWidget(self.gesture_reference)
+
+        # ── block 3: current bindings, clickable to change ───────────────────
+        self.activation_summary = QLabel()
+        self.camera_summary = QLabel()
+        self.pointer_summary = QLabel()
+        self.summary_heading_labels = {}
+        self.summary_rows = {}
+        self.setup_card = QFrame()
+        self.setup_card.setObjectName("setupCard")
+        setup_layout = QVBoxLayout(self.setup_card)
+        setup_layout.setContentsMargins(20, 12, 20, 12)
+        setup_layout.setSpacing(12)
+        for key, name, value, section_id, glyph in (
+            ("main.pointer", "pointer", self.pointer_summary, "pointer", "sliders"),
+            ("main.activation", "activation", self.activation_summary, "activation", "bolt"),
+            ("main.camera", "camera", self.camera_summary, "camera", "camera"),
+        ):
+            row, row_layout = self._build_summary_row(key, section_id, glyph)
+            value.setObjectName("summaryValue")
+            value.setWordWrap(True)
+            row_layout.addWidget(value)
+            self.summary_rows[name] = row
+            setup_layout.addWidget(row)
+
+        # The last-action answer only exists once something has run.
         self.last_action_block = QFrame()
         self.last_action_block.setObjectName("lastActionBlock")
-        last_action_layout = QVBoxLayout(self.last_action_block)
+        last_action_layout = QHBoxLayout(self.last_action_block)
         last_action_layout.setContentsMargins(0, 0, 0, 0)
-        last_action_layout.setSpacing(12)
-        divider = QFrame()
-        divider.setObjectName("hairline")
-        divider.setFrameShape(QFrame.NoFrame)
-        last_action_layout.addWidget(divider)
-        last_action_heading_row = QHBoxLayout()
-        last_action_heading_row.setSpacing(6)
-        last_action_heading_row.addWidget(self._heading_icon("history"))
+        last_action_layout.setSpacing(6)
+        last_action_layout.addWidget(self._heading_icon("history"))
         self.last_action_heading = QLabel()
         self.last_action_heading.setObjectName("summaryLabel")
         self._last_action_key = ""
         self.last_action_value = QLabel(tr("main.last_action.none"))
         self.last_action_value.setObjectName("lastActionValue")
         self.last_action_value.setWordWrap(True)
-        last_action_heading_row.addWidget(self.last_action_heading)
-        last_action_heading_row.addStretch()
-        last_action_layout.addLayout(last_action_heading_row)
-        last_action_layout.addWidget(self.last_action_value)
+        last_action_layout.addWidget(self.last_action_heading)
+        last_action_layout.addWidget(self.last_action_value, 1)
         self.last_action_block.setVisible(False)
-        session_layout.addWidget(self.last_action_block)
 
-        self.primary_control_button = QPushButton()
-        self.primary_control_button.setObjectName("primaryControlButton")
-        self.primary_control_button.setMinimumHeight(52)
-        self.primary_control_button.clicked.connect(self._perform_primary_action)
-        session_layout.addWidget(self.primary_control_button)
+        session_layout.addWidget(self.last_action_block)
         right_column = QVBoxLayout()
+        right_column.setSpacing(12)
         right_column.addWidget(self.session_card)
-        right_column.addStretch()
-        content.addLayout(right_column, 2)
+        right_column.addStretch(1)
+        right_column.addWidget(self.setup_card)
+        content.addLayout(right_column, 1)
         layout.addLayout(content, 1)
         self.retranslate_ui()
+        # Applied last: an earlier resize gets overridden once the layout has
+        # computed its own minimum from the real widget tree.
+        self._restore_window_geometry()
+        self.primary_control_button.setFocus(Qt.OtherFocusReason)
+        order = [self.primary_control_button, self.settings_btn, *self.summary_rows.values(),
+                 self.gesture_reference.more, self.gesture_reference.configure]
+        for previous, following in zip(order, order[1:]):
+            self.setTabOrder(previous, following)
+
+    def _session_hint_text(self):
+        """One sentence telling the user what to do next, not what state it is in.
+
+        The card used to lead with a bare state word ("就绪"/Ready) that repeated
+        the header chip and answered nothing. A new user's actual question is
+        "what do I do now?", so the hint states the next action.
+        """
+        if self._status_override_key == "main.starting_camera":
+            return tr("main.hint.starting")
+        if self._status_override_key or self._hold_shortcut_error_key:
+            return tr("main.hint.recover")
+        if self._start_blocked_by_permissions():
+            return tr("main.hint.needs_permission")
+        if self.is_running and self._control_snapshot is not None:
+            if self._control_snapshot.session_state is SessionState.POINTER:
+                return tr("main.hint.controlling")
+        mode = self.control_session.mode.value
+        if mode == "always":
+            return tr("main.hint.always_running" if self.is_running else "main.hint.always_ready")
+        if mode == "hold_shortcut":
+            shortcut = (self.config.get("control_session") or {}).get("hold_shortcut", "")
+            if not shortcut:
+                return tr("main.hint.shortcut_missing")
+            return tr("main.hint.shortcut_running" if self.is_running else "main.hint.shortcut_ready",
+                      shortcut=shortcut)
+        template = self.control_session.activation_template
+        gesture = (template.name if template is not None else
+                   tr(self._GESTURE_LABEL_KEYS.get(self.control_session.activation_gesture, "gesture.unavailable")))
+        shortcut = (self.config.get("control_session") or {}).get("hold_shortcut", "")
+        if mode == "gesture_or_shortcut" and shortcut:
+            return tr("main.hint.either_running" if self.is_running else "main.hint.either_ready",
+                      gesture=gesture, shortcut=shortcut)
+        return tr("main.hint.gesture_running" if self.is_running else "main.hint.gesture_ready", gesture=gesture)
+
+    def _refresh_interaction_feedback(self, outcomes=None):
+        feedback = interaction_feedback_model(
+            self._control_snapshot, is_running=self.is_running,
+            session_state=(None if self._control_snapshot is not None else self.control_session.state),
+            ready=not self._start_blocked_by_permissions(), outcomes=outcomes,
+        )
+        feedback = self.interaction_presenter.update(feedback, now=time.monotonic())
+        self.interaction_panel.present(feedback, introduction=not self.is_running)
+        self.interaction_panel.setVisible(self.is_running or not self._start_blocked_by_permissions())
+
+    def _rebuild_gesture_reference(self):
+        self.gesture_reference.set_bindings(
+            self._bound_gestures(),
+            lambda gesture: tr(self._GESTURE_LABEL_KEYS.get(gesture, "gesture.unavailable")),
+            self._action_label,
+        )
+        self.gesture_rows = self.gesture_reference.rows
+
+    def _bound_gestures(self):
+        """Return (gesture_id, action) for every gesture the runtime would act on."""
+        bindings = []
+        core = (
+            ("point", "move_cursor"),
+            ("pinch", "left_click"),
+            ("pinch_hold", "drag"),
+        )
+        if (self.config.get("pointer_scroll") or {}).get("enabled", True):
+            core += (("thumb_up", "scroll_up"), ("thumb_down", "scroll_down"))
+        for gesture_id, default_action in core:
+            bindings.append((gesture_id, default_action))
+        for gesture_id in self._GESTURE_LABEL_KEYS:
+            if gesture_id in {item[0] for item in core}:
+                continue
+            gesture = self.config.get_gesture(gesture_id) or {}
+            if not gesture.get("enabled") or gesture.get("action", "none") == "none":
+                continue
+            bindings.append((gesture_id, gesture.get("action")))
+        return bindings
+
+    def _action_label(self, action):
+        """Translate an action id, falling back to the id itself."""
+        key = f"gesture.action.{action}"
+        label = tr(key)
+        return action if label == key else label
 
     def _build_summary_row(self, key, section_id, glyph):
         """One session fact, clickable anywhere to edit it in Settings."""
@@ -1230,14 +1462,15 @@ class MainWindow(QMainWindow):
         """Idle state for the camera well.
 
         A large black rectangle with one centred line reads as a broken preview.
-        A dimmed hand glyph plus an explanation tells the operator what the area
-        is for before any camera exists.
+        The placeholder now teaches the three steps that make this window work —
+        grant access, start, take the pointer — because that is exactly what a
+        first-run user is looking at this empty space to find out.
         """
         holder = QWidget()
         holder.setObjectName("previewPlaceholder")
         layout = QVBoxLayout(holder)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(14)
         layout.addStretch()
 
         self.preview_placeholder_icon = QLabel()
@@ -1250,16 +1483,20 @@ class MainWindow(QMainWindow):
         self.preview_placeholder_title.setObjectName("placeholderTitle")
         self.preview_placeholder_title.setAlignment(Qt.AlignCenter)
 
+        self.preview_placeholder_steps = QLabel()
+        self.preview_placeholder_steps.setObjectName("placeholderSteps")
+        self.preview_placeholder_steps.setAlignment(Qt.AlignCenter)
+        self.preview_placeholder_steps.setWordWrap(True)
+
         layout.addWidget(self.preview_placeholder_icon)
         layout.addWidget(self.preview_placeholder_title)
+        layout.addWidget(self.preview_placeholder_steps)
         layout.addStretch()
         return holder
 
     @staticmethod
     def _placeholder_pixmap(size=72, color="#39404E"):
         """Render the idle hand glyph from the project's SVG icon set."""
-        from gui.gesture_icons_svg import GestureIconsSVG
-
         renderer = GestureIconsSVG.get_renderer("open_hand", color)
         if renderer is None:
             return None
@@ -1278,16 +1515,23 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(tr("main.title"))
         self.app_title_label.setText(tr("main.title"))
         self.settings_btn.setText(tr("main.settings"))
+        self.settings_btn.setAccessibleName(tr("main.settings"))
         self.preview_title.setText(tr("main.live_camera"))
         self.preview_placeholder_title.setText(tr("main.preview_waiting"))
+        self.preview_placeholder_steps.setText(tr("main.preview_steps"))
         if not self.video_label.pixmap():
             self.video_label.setText(tr("main.preview_waiting"))
         self.gesture_label.setText(
             tr("main.no_hand") if self.is_running else tr("main.preview_idle")
         )
-        self.session_title.setText(tr("main.control_session"))
+        self.session_hint.setText(self._session_hint_text())
+        self.gesture_reference_title.setText(tr("main.gesture_reference"))
+        self.gesture_reference_hint.setText(tr("main.gesture_reference_hint"))
+        self._rebuild_gesture_reference()
         for key, label in self.summary_heading_labels.items():
             label.setText(tr(key))
+        for key, row in self.summary_rows.items():
+            row.setAccessibleName(tr({"pointer": "main.pointer", "activation": "main.activation", "camera": "main.camera"}[key]))
         for permission_key, name_key in (
             ("camera", "permission.name.camera"),
             ("accessibility", "permission.name.accessibility"),
@@ -1304,68 +1548,241 @@ class MainWindow(QMainWindow):
         self._position_overlay()
 
     def _start_video_worker(self):
-        """Start capture/model initialization in the worker, never the UI thread."""
+        """Connect camera observations directly to one isolated control runtime."""
         if self.video_worker and self.video_worker.isRunning():
-            return True
+            return bool(self.control_runtime and self.control_runtime.is_running)
+        if any(worker.isRunning() for worker in _RETIRING_VIDEO_WORKERS):
+            return False
+        if not self._stop_control_runtime():
+            return False
+        guard = getattr(self, "_runtime_guard", None)
+        if guard is not None and guard.release_pending:
+            return False
         self._last_worker_timestamp_ms = float("-inf")
         self._last_frame_time = float("-inf")
-        camera_config = self.config.get("camera") or {}
-        cam_id = camera_config.get("id", 0)
-        if self.preset.is_performance:
-            # The profile owns capture size: finer landmarks are the point.
-            w, h = self.preset.camera_width, self.preset.camera_height
-        else:
-            w = camera_config.get("width", 640)
-            h = camera_config.get("height", 480)
-        self.video_worker = MediaPipeVideoWorker(
-            camera_id=cam_id,
-            width=w,
-            height=h,
+        self._control_snapshot = None
+        camera_config = deepcopy(self.config.get("camera") or {})
+        services = self.platform_services
+        policy = ContextPolicy.from_config(self.config.get("context_aware") or {})
+        # A previously closed broker can still be waiting on a hung native AX
+        # call. Reuse its fail-closed cache until it exits instead of creating
+        # an unbounded series of background lookup threads on every restart.
+        context = self._runtime_context or AsyncContextProvider(services.context_provider, policy=policy)
+        telemetry = AsyncTelemetry(self.telemetry) if self.telemetry is not None else None
+        runtime_services = replace(services, context_provider=context)
+        coordinator = GestureActionCoordinator(runtime_services)
+        config = deepcopy(self.config.config)
+        config["_config_path"] = str(self.config.config_path)
+        try:
+            engine = ControlEngine(
+                config, self._compute_screen_bounds(), coordinator,
+                cursor_position=getattr(services.input_controller, "cursor_position", lambda: None),
+                telemetry=telemetry,
+            )
+            runtime = ControlRuntime(engine)
+        except Exception:
+            context.close()
+            if telemetry is not None:
+                telemetry.close()
+            coordinator.close()
+            raise
+        self.control_runtime = runtime
+        self._runtime_guard = coordinator.input_guard
+        self._runtime_context = context
+        self._runtime_telemetry = telemetry
+        detector_type = self.detector_type
+        detection_confidence = self.detection_confidence
+        tracking_confidence = self.tracking_confidence
+        preset = self.preset
+        monitor = services.hold_shortcut_monitor
+        intervals = dict(self._POWER_FRAME_INTERVALS)
+        worker = None
+
+        def consume(landmark_frame):
+            # Runs on the capture thread. No QWidget, QCursor, or GUI state is
+            # accessed; this closure can only submit to its original runtime.
+            try:
+                held = bool(monitor and monitor.is_held())
+            except Exception:
+                held = False
+            observation = _hand_observation(landmark_frame, held)
+            preview = LandmarkFrame(landmark_frame.frame, observation.landmarks,
+                                    getattr(landmark_frame, "timestamp_ms", None))
+            runtime.submit(observation, preview)
+            if worker is not None:
+                worker.set_min_frame_interval(intervals.get(runtime.power_mode, 0.0))
+
+        worker = MediaPipeVideoWorker(
+            camera_id=camera_config.get("id", 0),
+            width=preset.camera_width if preset.is_performance else camera_config.get("width", 640),
+            height=preset.camera_height if preset.is_performance else camera_config.get("height", 480),
             detector_factory=lambda: create_detector(
-                self.detector_type,
-                self.detection_confidence,
-                self.tracking_confidence,
-                delegate=self.preset.delegate,
+                detector_type, detection_confidence, tracking_confidence, delegate=preset.delegate,
             ),
             capture_opener=lambda: open_configured_camera(
-                camera_config,
-                self.platform_services.camera_service,
-                legacy_open=open_camera,
+                camera_config, services.camera_service, legacy_open=open_camera,
             ),
             parent=self,
+            frame_consumer=consume,
         )
-        self.video_worker.landmark_frame_ready.connect(self.process_frame)
-        self.video_worker.worker_ready.connect(self._on_worker_ready)
-        self.video_worker.worker_error.connect(self._on_worker_error)
-        self.video_worker.start()
+        self.video_worker = worker
+        worker.source_ready.connect(self._on_source_ready)
+        worker.source_error.connect(self._on_source_error)
+        runtime.start()
+        worker.start()
         return True
+
+    def _stop_control_runtime(self):
+        runtime = getattr(self, "control_runtime", None)
+        if runtime is not None:
+            if not runtime.stop(timeout=0.1):
+                return False
+            self.control_runtime = None
+        context = getattr(self, "_runtime_context", None)
+        if context is not None:
+            if context.close(timeout=0.0):
+                self._runtime_context = None
+        telemetry = getattr(self, "_runtime_telemetry", None)
+        if telemetry is not None:
+            if not telemetry.close(timeout=0.1):
+                return False
+            self._runtime_telemetry = None
+        self._control_snapshot = None
+        # The retired watchdog still owns the native controller until its
+        # owed mouse-up succeeds. Calling the GUI coordinator's separate guard
+        # meanwhile would race the same controller or block Qt on that release.
+        guard = getattr(self, "_runtime_guard", None)
+        return guard is None or not guard.release_pending
+
+    def _drain_control_runtime(self):
+        runtime = getattr(self, "control_runtime", None)
+        if runtime is None:
+            return
+        view = runtime.take_latest()
+        if view is None:
+            return
+        self.power_mode = view.power_mode
+        self._present_control_snapshot(view.snapshot, view.frame, view.outcomes)
+        if view.snapshot.error == "control_failed":
+            self.is_running = False
+            self._stop_video_worker()
+            self._stop_hold_shortcut_monitor()
+            self._status_override_key = "main.control_unavailable"
+            self._refresh_precision_console()
+
+    def _present_control_snapshot(self, snapshot, preview=None, outcomes=None):
+        """Render immutable control feedback; never inspect the live engine."""
+        self._control_snapshot = snapshot
+        self.hud_anchor = snapshot.anchor
+        if not snapshot.hand_present or snapshot.session_state is not SessionState.POINTER:
+            self.hud.hide_persistent()
+        elif snapshot.pointer_state is ActionState.DRAGGING:
+            self.hud.show_dragging(snapshot.timestamp)
+        elif snapshot.locked_position is not None:
+            self.hud.show_locking(snapshot.timestamp)
+        else:
+            self.hud.show_pointer(snapshot.timestamp)
+        for outcome in snapshot.outcomes if outcomes is None else outcomes:
+            if outcome.result is None:
+                continue
+            request = outcome.request
+            anchor = (request.x, request.y) if request.x is not None and request.y is not None else snapshot.anchor
+            self._update_hud_after_dispatch(request.action, outcome.result, anchor, now=snapshot.timestamp)
+            if request.contextual and outcome.result.executed:
+                self.hud.show_contextual(self._action_label(request.action), snapshot.timestamp)
+        self._refresh_control_session_status()
+        status = self._get_status_text(snapshot.hand_present)
+        self._refresh_interaction_feedback(outcomes)
+        self.gesture_label.setText(tr("main.gesture_status", gesture=self._gesture_status_label(snapshot.gesture), status=status))
+        self._set_preview_status_dot("granted" if snapshot.hand_present else "pending")
+        if preview is not None and not snapshot.error:
+            frame = preview.frame.copy() if hasattr(preview.frame, "copy") else preview.frame
+            landmarks = preview.landmarks if snapshot.hand_present else ()
+            if getattr(self, "control_runtime", None) is not None:
+                self._check_preview_edge_lost(landmarks, frame.shape, snapshot.timestamp)
+            else:
+                self._check_edge_lost(landmarks, snapshot.timestamp)
+            frame = self._draw_landmarks(frame, landmarks)
+            if snapshot.preview_locked_position is not None:
+                frame = self._draw_aiming_indicator(frame, snapshot.preview_locked_position)
+            frame = self._draw_edge_hint(frame, timestamp=snapshot.timestamp)
+            self.display_frame(frame)
+
+    def _check_preview_edge_lost(self, landmarks, frame_shape, now):
+        """Keep edge feedback in presentation space, independent of tracking state."""
+        if landmarks and len(landmarks) > 8:
+            self._preview_last_pointer = (landmarks[8][0], landmarks[8][1])
+        elif getattr(self, "_preview_last_pointer", None) is not None:
+            x, y = self._preview_last_pointer
+            height, width = frame_shape[:2]
+            dx = -1 if x < width * 0.15 else 1 if x > width * 0.85 else 0
+            dy = -1 if y < height * 0.15 else 1 if y > height * 0.85 else 0
+            if dx or dy:
+                self.edge_lost_time = now
+                self.edge_lost_direction = (dx, dy)
+                self.edge_lost_position = (int(x), int(y))
+            self._preview_last_pointer = None
+
+    def _consume_worker_frame(self, worker):
+        """Compatibility hook for queued preview signals; never decides input."""
+        if worker is self.video_worker and self.is_running:
+            self._drain_control_runtime()
 
     def _on_worker_ready(self):
         """Update UI only after the worker owns an opened selected camera."""
+        sender = self.sender()
+        if isinstance(sender, MediaPipeVideoWorker) and sender is not self.video_worker:
+            return
         if not self.is_running:
             return
         self._status_override_key = ""
         self._refresh_precision_console()
 
+    def _on_source_ready(self, worker):
+        if worker is self.video_worker:
+            self._on_worker_ready()
+
+    def _on_source_error(self, worker, message):
+        if worker is self.video_worker:
+            self._on_worker_error(message)
+
     def _stop_video_worker(self):
+        stopped = self._stop_control_runtime()
         if self.video_worker:
-            self.video_worker.stop()
-            self.video_worker.wait(2000)
-            self.video_worker.deleteLater()
+            worker = self.video_worker
             self.video_worker = None
+            worker.stop()
+            worker.source_ready.disconnect(self._on_source_ready)
+            worker.source_error.disconnect(self._on_source_error)
+            if worker.wait(100):
+                worker.deleteLater()
+            else:
+                worker.setParent(None)
+                _RETIRING_VIDEO_WORKERS.add(worker)
+                worker.finished.connect(worker.deleteLater)
+                worker.finished.connect(lambda w=worker: _RETIRING_VIDEO_WORKERS.discard(w))
+                if not worker.isRunning():
+                    _RETIRING_VIDEO_WORKERS.discard(worker)
+                    worker.deleteLater()
         if self.detector:
             self.detector.release()
         self.detector = None
         self._last_worker_timestamp_ms = float("-inf")
         self._last_frame_time = float("-inf")
+        return stopped
 
     def _on_worker_error(self, message):
+        sender = self.sender()
+        if isinstance(sender, MediaPipeVideoWorker) and sender is not self.video_worker:
+            return
         self.is_running = False
         self._stop_hold_shortcut_monitor()
+        stopped = self._stop_video_worker()
         self.control_session.reset()
         self.action_machine.reset()
         self._reset_gesture_observation_state()
-        self.action_coordinator.stop()
+        if stopped is not False:
+            self.action_coordinator.stop()
         self.hud.hide_persistent()
         self.overlay.hide_feedback()
         selected_device_id = (self.config.get("camera") or {}).get("device_id", "")
@@ -1429,6 +1846,8 @@ class MainWindow(QMainWindow):
             self.platform_services.capabilities.camera_permission_promptable,
         )
         self.primary_control_button.setText(model.label)
+        self.primary_control_button.setAccessibleName(model.label)
+        self.primary_control_button.setToolTip(tr("main.stop_hint") if self.is_running else model.label)
         glyph = {
             "start": "play",
             "stop": "stop",
@@ -1443,7 +1862,11 @@ class MainWindow(QMainWindow):
         self.primary_control_button.style().polish(self.primary_control_button)
         # The chip reports state, never the primary action: repeating the button
         # label here made two controls on one screen claim to be the same thing.
-        if self.is_running:
+        if self._status_override_key == "main.starting_camera":
+            # Running, but not ready yet: the status line says the same thing, so
+            # "Running" beside "Starting camera…" would contradict it.
+            chip_text, chip_semantic = tr("main.starting_camera"), "waiting"
+        elif self.is_running:
             chip_text, chip_semantic = tr("main.running"), "running"
         elif self._status_override_key or self._hold_shortcut_error_key:
             chip_text, chip_semantic = tr("main.control_unavailable"), "danger"
@@ -1456,6 +1879,8 @@ class MainWindow(QMainWindow):
         self.status_chip.style().unpolish(self.status_chip)
         self.status_chip.style().polish(self.status_chip)
         self.activation_summary.setText(self._activation_summary_text())
+        mapping = (self.config.get("pointer_mapping") or {}).get("mode", "absolute")
+        self.pointer_summary.setText(tr("main.mapping.relative" if mapping == "relative" else "main.mapping.absolute"))
         devices = self.platform_services.camera_service.list_devices()
         selected_id = (self.config.get("camera") or {}).get("device_id", "")
         selected = next((device for device in devices if device.device_id == selected_id), None)
@@ -1463,6 +1888,7 @@ class MainWindow(QMainWindow):
             selected.display_name if selected else tr("main.select_camera_settings")
         )
         self._refresh_control_session_status()
+        self._refresh_interaction_feedback()
 
     def _refresh_last_action(self):
         """Show the last deliberate action, or a quiet empty state.
@@ -1485,6 +1911,23 @@ class MainWindow(QMainWindow):
     # Lanes that fire continuously would rewrite this row every frame and make it
     # unreadable; only deliberate, discrete actions are worth remembering.
     _CONTINUOUS_ACTIONS = frozenset({"move_cursor", "drag", "none", ""})
+
+    def _freeze_pointer_for_pinch(self, screen_x, screen_y, pinch_info):
+        """Hold the pointer where the fingers actually closed.
+
+        The pinch label needs about four frames to stabilise. Letting the pointer
+        keep following the hand through that window added measured drift that
+        grew with hand speed — 2 px at a slow pace, 20 px at 300 px/s, 40 px at
+        600 px/s — which then had to be absorbed by snapping, and the click still
+        landed away from where the pinch began. Freezing on the raw pinch frame
+        makes the pointer and the click agree exactly.
+        """
+        if pinch_info and pinch_info.get("is_pinching"):
+            if self._pinch_freeze_pos is None:
+                self._pinch_freeze_pos = (screen_x, screen_y)
+        else:
+            self._pinch_freeze_pos = None
+        return self._pinch_freeze_pos or (screen_x, screen_y)
 
     def _record_last_action(self, action):
         """Remember one executed action for the session card."""
@@ -1512,6 +1955,12 @@ class MainWindow(QMainWindow):
         mode_key = mode_keys.get(self.control_session.mode.value)
         mode_text = tr(mode_key) if mode_key else tr("gesture.unavailable")
 
+        shortcut = (self.config.get("control_session") or {}).get("hold_shortcut", "")
+        if self.control_session.mode is ActivationMode.ALWAYS:
+            return mode_text
+        if self.control_session.mode is ActivationMode.HOLD_SHORTCUT:
+            return f"{mode_text} · {shortcut or tr('main.shortcut_not_set')}"
+
         template = self.control_session.activation_template
         if template is not None:
             detail = tr(
@@ -1521,6 +1970,8 @@ class MainWindow(QMainWindow):
         else:
             label_key = self._GESTURE_LABEL_KEYS.get(self.control_session.activation_gesture)
             detail = tr(label_key) if label_key else tr("gesture.unavailable")
+        if self.control_session.mode is ActivationMode.GESTURE_OR_SHORTCUT and shortcut:
+            return f"{detail} / {shortcut}"
         return f"{mode_text} · {detail}"
 
     def _start_blocked_by_permissions(self) -> bool:
@@ -1531,17 +1982,37 @@ class MainWindow(QMainWindow):
             or permissions.accessibility.value != "granted"
         )
 
+    _STATE_DOT_SEMANTICS = {
+        "active": "granted",
+        "armed": "granted",
+        "waiting": "pending",
+        "danger": "denied",
+        "idle": "idle",
+        "": "idle",
+    }
+
     def _refresh_control_session_status(self):
         if self._status_override_key:
-            self.status_indicator.setText(f"● {self._status_override_label(self._status_override_key)}")
-            semantic_state = "danger"
+            # The bullet that used to be baked into this string is now a real
+            # state dot sized and coloured by the theme; a glyph inside localised
+            # text cannot be restyled, and VoiceOver reads it out.
+            self.status_indicator.setText(self._status_override_label(self._status_override_key))
+            # "Starting camera…" is a transient the user asked for, not a fault;
+            # painting it in the danger colour claims a failure that has not
+            # happened yet. Repairable failures keep the danger colour.
+            semantic_state = (
+                "waiting"
+                if self._status_override_key == "main.starting_camera"
+                else "danger"
+            )
         elif self._hold_shortcut_error_key:
             self.status_indicator.setText(self._status_override_label(self._hold_shortcut_error_key))
             semantic_state = "danger"
         else:
             status = control_session_status_model(
                 self.is_running,
-                self.control_session.state,
+                (self._control_snapshot.session_state if self._control_snapshot is not None
+                 else self.control_session.state),
                 self.control_session.activation_gesture,
                 ready=not self._start_blocked_by_permissions(),
             )
@@ -1550,6 +2021,14 @@ class MainWindow(QMainWindow):
         self.status_indicator.setProperty("semantic", semantic_state)
         self.status_indicator.style().unpolish(self.status_indicator)
         self.status_indicator.style().polish(self.status_indicator)
+        if hasattr(self, "state_dot"):
+            self.state_dot.setProperty(
+                "semantic", self._STATE_DOT_SEMANTICS.get(semantic_state, "idle")
+            )
+            self.state_dot.style().unpolish(self.state_dot)
+            self.state_dot.style().polish(self.state_dot)
+        if hasattr(self, "session_hint"):
+            self.session_hint.setText(self._session_hint_text())
 
     def _perform_primary_action(self):
         model = control_button_model(
@@ -1564,18 +2043,36 @@ class MainWindow(QMainWindow):
         else:
             self.toggle_running()
 
+    def _stop_from_keyboard(self):
+        """Escape can only stop an active window's session, never start input."""
+        if self.is_running:
+            self.toggle_running()
+
     def _create_platform_services_from_config(self):
         """Create services with the policy persisted by the most recent Settings Save."""
         policy = ContextPolicy.from_config(self.config.get("context_aware") or {})
         return create_platform_services(context_policy=policy)
 
     def _refresh_platform_services(self):
+        if not self._stop_control_runtime():
+            self._status_override_key = "main.control_unavailable"
+            return False
+        guard = getattr(self, "_runtime_guard", None)
+        if guard is not None and guard.release_pending:
+            self._status_override_key = "main.control_unavailable"
+            return False
         self._stop_hold_shortcut_monitor()
+        # Keep the controller that still owes a mouse-up so recovery can retry.
+        if not self.action_coordinator.stop().executed:
+            self._status_override_key = "main.control_unavailable"
+            return False
+        self.action_coordinator.close()
         self.platform_services = self._create_platform_services_from_config()
         self.action_coordinator = GestureActionCoordinator(self.platform_services)
         self._refresh_control_session_from_config()
         self._refresh_permission_status()
         self._refresh_precision_console()
+        return True
 
     def request_accessibility_permission(self):
         """Ask macOS once, then put the user in front of the switch.
@@ -1665,6 +2162,11 @@ class MainWindow(QMainWindow):
         self._start_after_camera_permission()
 
     def _start_after_camera_permission(self):
+        # Granting access *is* the user's decision to start: the primary button
+        # that asked for the prompt is the same button that will say "Stop".
+        # Without this the worker starts but every frame is dropped, because
+        # process_frame and _on_worker_ready both treat the session as stopped.
+        self.is_running = True
         self._status_override_key = ""
         self._hold_shortcut_error_key = ""
         if not self._start_video_worker():
@@ -1672,7 +2174,8 @@ class MainWindow(QMainWindow):
             self.control_session.reset()
             self.action_machine.reset()
             self._reset_gesture_observation_state()
-            self.action_coordinator.stop()
+            if getattr(self, "control_runtime", None) is None:
+                self.action_coordinator.stop()
             self.hud.hide_persistent()
             self.overlay.hide_feedback()
             selected_device_id = (self.config.get("camera") or {}).get("device_id", "")
@@ -1685,9 +2188,10 @@ class MainWindow(QMainWindow):
             return
         if not self._start_hold_shortcut_monitor():
             self.is_running = False
-            self._stop_video_worker()
+            stopped = self._stop_video_worker()
             self._reset_gesture_observation_state()
-            self.action_coordinator.stop()
+            if stopped is not False:
+                self.action_coordinator.stop()
             self._hold_shortcut_error_key = "main.hold_shortcut_unavailable"
             self._refresh_precision_console()
             return
@@ -1746,7 +2250,10 @@ class MainWindow(QMainWindow):
         """切换运行状态"""
         self.is_running = not self.is_running
         if self.is_running:
-            self._refresh_platform_services()
+            if self._refresh_platform_services() is False:
+                self.is_running = False
+                self._refresh_precision_console()
+                return
             camera_state = self.platform_services.permission_provider.snapshot().camera
             if camera_state.value == "not_determined":
                 self.request_camera_permission_and_start()
@@ -1765,10 +2272,14 @@ class MainWindow(QMainWindow):
         else:
             self._status_override_key = ""
             self._hold_shortcut_error_key = ""
+            stopped = self._stop_video_worker()
+            if stopped is not False:
+                self.action_coordinator.stop()
+            else:
+                self._status_override_key = "main.control_unavailable"
             # 停止红外检测器
             if self.ir_detector:
                 self.ir_detector.stop()
-            self._stop_video_worker()
             self._stop_hold_shortcut_monitor()
             self.video_label.clear()
             self.tracker.reset()
@@ -1778,7 +2289,6 @@ class MainWindow(QMainWindow):
             self._reset_gesture_observation_state()
             self.control_session.reset()
             self.combo_detector.reset()
-            self.action_coordinator.stop()
             self.hud.hide_persistent()
             self.overlay.hide_feedback()
             self.power_mode = "normal"
@@ -1788,184 +2298,56 @@ class MainWindow(QMainWindow):
             self._last_action_key = ""
             self._refresh_last_action()
             self.gesture_label.setText(tr("main.preview_idle"))
+            self._set_preview_status_dot("idle")
             self._refresh_precision_console()
 
     def process_frame(self, landmark_frame: LandmarkFrame):
-        """在 Qt 主线程处理 worker 发来的最新推理结果。"""
-        import time
+        """Synchronous replay entry point using the same engine as live control."""
         if not self.is_running:
             return
-        frame = landmark_frame.frame
-        landmarks_valid, landmarks = self._validate_landmarks(landmark_frame.landmarks)
-        clock_now = time.monotonic()
-        worker_timestamp_ms = getattr(landmark_frame, "timestamp_ms", None)
-        if worker_timestamp_ms is None:
-            frame_time = max(clock_now, getattr(self, "_last_frame_time", float("-inf")) + 0.001)
+        engine = self._replay_engine()
+        timestamp_ms = getattr(landmark_frame, "timestamp_ms", None)
+        if timestamp_ms is not None and not self._accept_worker_timestamp(timestamp_ms):
+            engine._outcomes = list(engine.reset())
+            snapshot = engine._snapshot(time.monotonic(), error="invalid_frame_time")
         else:
-            if not self._accept_worker_timestamp(worker_timestamp_ms):
-                self._fail_closed_for_invalid_frame_time()
-                return
-            frame_time = worker_timestamp_ms / 1000.0
-        self._last_frame_time = frame_time
-        if not landmarks_valid:
-            self._fail_closed_for_invalid_landmarks(frame, frame_time)
-            return
+            observation = _hand_observation(landmark_frame, self._is_hold_shortcut_held())
+            snapshot = engine.step(observation)
+        self._copy_replay_state(engine)
+        self._present_control_snapshot(snapshot, landmark_frame)
+        self._render_hud(timestamp=snapshot.timestamp)
 
-        # 节能模式管理
-        self._update_power_mode(landmarks)
-
-        # Consume one monotonic worker timestamp across the entire control lane.
-        pos, detected = self.tracker.update(landmarks, frame.shape, timestamp=frame_time)
-        tracking_lost = not detected
-        released_this_frame = False
-        if tracking_lost:
-            # Tracker may retain a predicted pointer location briefly after the
-            # hand disappears. That position is not valid evidence that the
-            # same accessible target is still intentionally being pointed at.
-            self._reset_gesture_observation_state()
-            # The platform controller is authoritative for native mouse-down
-            # state, so request its idempotent release without assuming the
-            # Python state machine is still synchronized.
-            self.action_coordinator.stop()
-            released_this_frame = True
-            self.action_machine.reset()
-
-        # Edge feedback shares the worker's monotonic frame clock.
-        self._check_edge_lost(landmarks, frame_time)
-
-        hand_present = bool(landmarks)
-        if hand_present and not getattr(self, "_hand_present_last_frame", False):
-            # Hand returned: relative mode must re-anchor, otherwise the cursor
-            # jumps by however far the hand moved while it was out of frame.
-            self._pointer_anchor_pending = True
-        self._hand_present_last_frame = hand_present
-
-        gesture = self.classifier.classify(landmarks, timestamp=frame_time)
-        if landmarks:
-            assessment = self.hand_dynamics.update(landmarks, frame_time)
-            # The episode tracker watches the classifier's own label, before the
-            # guard rewrites it: otherwise a suppressed pinch would leave no
-            # record, and suppression is exactly what the model has to judge.
-            self._observe_pinch_episode(gesture, assessment, frame_time)
-            gesture = self._apply_dynamics(gesture, assessment)
-        else:
-            self.hand_dynamics.reset()
-        allowed_before_update = self.control_session.allows_pointer_actions()
-        self.control_session.update(
-            gesture=gesture,
-            has_hand=bool(landmarks),
-            shortcut_held=self._is_hold_shortcut_held(),
-            now=frame_time,
-            landmarks=landmarks,
-        )
-        if not allowed_before_update and self.control_session.allows_pointer_actions():
-            # A fresh pointer session is the clutch: relative mode re-anchors
-            # here rather than inheriting a stale hand position.
-            self._pointer_anchor_pending = True
-        if allowed_before_update and not self.control_session.allows_pointer_actions():
-            # The session gate is an input-safety boundary.  If it closes,
-            # release a native drag even when the hand is already lost and no
-            # cursor position is available for the normal action path.
-            if not released_this_frame:
-                self.action_coordinator.stop()
-            self.action_machine.reset()
-            self.hand_dynamics.reset()
-            self._reset_gesture_observation_state()
-            self.hud.hide_persistent()
-            self.overlay.hide_feedback()
-        self._refresh_control_session_status()
-        # Low-level labels are evidence, not commands. The arbiter grants one
-        # lane ownership before optional shortcuts or pointer state transitions
-        # may consume this frame.
-        pinch_info = self.classifier.get_pinch_info(landmarks, timestamp=frame_time)
-        intent_decision = self.intent_arbiter.update(
-            gesture=gesture,
-            pinch_info=pinch_info,
-            pointer_state=self.action_machine.state,
-            hand_present=bool(landmarks) and detected,
-            now=frame_time,
-        )
-        status = self._get_status_text(detected)
-        self.gesture_label.setText(
-            tr("main.gesture_status", gesture=self._gesture_status_label(gesture), status=status)
-        )
-
-        # 执行绑定的动作
-        lock_info = None
-        if pos and detected:
-            dynamic_anchor = self._map_pointer(pos, (frame.shape[1], frame.shape[0])) or (0, 0)
-            dynamic_config = self.config.get("dynamic_gestures") or {}
-            dynamic_lane_available = (
-                intent_decision.allow_dynamic
-                and dynamic_config.get("enabled", False)
-                and self.dynamic_runtime_matcher is not None
+    def _replay_engine(self):
+        if getattr(self, "control_runtime", None) is not None:
+            raise RuntimeError("Synchronous replay is unavailable while a control runtime owns input")
+        config = deepcopy(self.config.config)
+        config["_config_path"] = str(self.config.config_path)
+        engine = getattr(self, "_synchronous_engine", None)
+        if engine is None:
+            engine = ControlEngine(
+                config, self.screen_bounds, self.action_coordinator,
+                cursor_position=getattr(self.platform_services.input_controller, "cursor_position", lambda: None),
+                clock=lambda: time.monotonic(), telemetry=self.telemetry,
             )
-            _observation, dynamic_matched = self.observe_completed_dynamic_shortcut(
-                landmarks,
-                dynamic_anchor,
-                gesture=gesture,
-                allowed=dynamic_lane_available,
-                hand_present=bool(landmarks) and detected,
-                now=frame_time,
-            )
-            dynamic_owns_frame = (
-                _observation.recording
-                or _observation.completed_frames is not None
-                or _observation.owns_frame
-            )
-            if dynamic_matched or dynamic_owns_frame:
-                # Dynamic recording and its terminal neutral boundary own the
-                # current frame. Even a rejected completed take must not fall
-                # through and reinterpret its final neutral pose as a static,
-                # combo, contextual, or pointer command.
-                self._render_hud(timestamp=frame_time)
-                self.display_frame(self._draw_landmarks(frame, landmarks))
-                return
-            lock_info = self.execute_action(
-                gesture,
-                pos,
-                frame.shape,
-                pinch_info,
-                target_detected=detected,
-                intent_decision=intent_decision,
-                timestamp=frame_time,
-            )
-        else:
-            # A contextual candidate is valid only while the target remains
-            # continuously tracked. Never resume it after a lost hand/target.
-            self.contextual_intent_controller.reset()
-            self.hud.hide_persistent()
-        self._render_hud(timestamp=frame_time)
+            self._synchronous_engine = engine
+        # Legacy replay fixtures inject their component doubles on MainWindow.
+        # This bridge is never used for the isolated live runtime.
+        for key in tuple(engine.__dict__):
+            if key not in {"config", "clock", "cursor_position", "_outcomes", "_locked_position"} and key in self.__dict__:
+                setattr(engine, key, self.__dict__[key])
+        for key, value in tuple(self.__dict__.items()):
+            if callable(value) and key.startswith("_") and hasattr(ControlEngine, key):
+                setattr(engine, key, value)
+        engine.config = config
+        engine.action_coordinator = self.action_coordinator
+        engine.platform_services = self.platform_services
+        engine._outcomes = []
+        return engine
 
-        # 绘制并显示
-        frame = self._draw_landmarks(frame, landmarks)
-        # 绘制锁定状态视觉反馈
-        if lock_info and lock_info.get('is_locked'):
-            frame = self._draw_aiming_indicator(frame, lock_info['pos'])
-        # 绘制边缘丢失提示
-        frame = self._draw_edge_hint(frame, timestamp=frame_time)
-        self.display_frame(frame)
-
-    @staticmethod
-    def _validate_landmarks(landmarks):
-        """Return ``(valid, landmarks)`` for the strict 21-point runtime contract."""
-        if landmarks is None:
-            return True, None
-        if not isinstance(landmarks, (list, tuple)):
-            return False, None
-        if not landmarks:
-            return True, None
-        if len(landmarks) != 21:
-            return False, None
-        for point in landmarks:
-            if not isinstance(point, (list, tuple)) or len(point) != 3:
-                return False, None
-            if any(
-                not isinstance(value, Real) or isinstance(value, bool) or not isfinite(value)
-                for value in point
-            ):
-                return False, None
-        return True, landmarks
+    def _copy_replay_state(self, engine):
+        for key, value in engine.__dict__.items():
+            if key not in {"config", "clock", "cursor_position", "_outcomes", "_locked_position"} and key in self.__dict__:
+                setattr(self, key, value)
 
     def _fail_closed_control_boundary(self):
         """Release native input and forget partial gesture state at any unsafe boundary."""
@@ -1973,20 +2355,12 @@ class MainWindow(QMainWindow):
         self.action_machine.reset()
         self.control_session.reset()
         self._reset_gesture_observation_state()
+        self.tracker.reset()
+        self.smoother.reset()
+        self.classifier.reset_stabilization()
+        self.hand_dynamics.reset()
         self.hud.hide_persistent()
         self.overlay.hide_feedback()
-
-    def _fail_closed_for_invalid_landmarks(self, frame, frame_time):
-        """Treat malformed detector output as a tracking boundary before classification."""
-        self._update_power_mode(None)
-        self._check_edge_lost(None, frame_time)
-        self._fail_closed_control_boundary()
-        self._refresh_control_session_status()
-        self.gesture_label.setText(
-            tr("main.gesture_status", gesture=self._gesture_status_label("none"), status=self._get_status_text(False))
-        )
-        self._render_hud(timestamp=frame_time)
-        self.display_frame(frame)
 
     def _accept_worker_timestamp(self, timestamp_ms):
         """Accept only finite, strictly increasing timestamps from the worker."""
@@ -1994,222 +2368,35 @@ class MainWindow(QMainWindow):
             return False
         if not isfinite(timestamp_ms):
             return False
+        if not frame_is_fresh(timestamp_ms / 1000.0, time.monotonic()):
+            return False
         if timestamp_ms <= getattr(self, "_last_worker_timestamp_ms", float("-inf")):
             return False
         self._last_worker_timestamp_ms = timestamp_ms
         return True
 
-    def _fail_closed_for_invalid_frame_time(self):
-        """Stop input before an invalid camera timestamp can be reinterpreted."""
-        self._fail_closed_control_boundary()
-
     def execute_action(
-        self,
-        gesture,
-        pos,
-        frame_shape,
-        pinch_info=None,
-        target_detected=True,
-        intent_decision: IntentDecision | None = None,
-        timestamp: float | None = None,
+        self, gesture, pos, frame_shape, pinch_info=None, target_detected=True,
+        intent_decision: IntentDecision | None = None, timestamp: float | None = None,
     ):
-        """Dispatch one already-arbitrated gesture observation.
-
-        Direct callers without an ``intent_decision`` retain the legacy helper
-        behavior used by focused UI tests. Live camera frames always supply one
-        from ``IntentArbiter`` so optional lanes cannot steal pointer control.
-        """
-        import time
+        """Replay already-arbitrated evidence through the shared control engine."""
+        engine = self._replay_engine()
         now = time.monotonic() if timestamp is None else timestamp
-        if not self.control_session.allows_pointer_actions():
-            self.action_machine.reset()
-            self.contextual_intent_controller.reset()
-            self.hud.hide_persistent()
-            return None
-        h, w = frame_shape[:2]
-
-        # 映射到屏幕坐标（绝对/相对由配置决定，多屏取并集）
-        mapped = self._map_pointer(pos, (w, h))
-        if mapped is None:
-            return None
-        screen_x, screen_y = self.smoother.smooth(mapped[0], mapped[1], timestamp=now)
-        self.hud_anchor = (screen_x, screen_y)
-
-        sens = self.config.get("global_sensitivity") or {}
-        speed = sens.get("scroll_speed", 50)
-
-        # 获取自定义快捷键
-        gesture_cfg = self.config.get_gesture(gesture)
-        hotkey = gesture_cfg.get("hotkey", "")
-        contextual_label = ""
-        contextual_target_id = ""
-
-        # Pointer move/click/drag is a separate, deterministic lifecycle. For
-        # camera frames, the arbiter supplies the only label allowed to reach
-        # that state machine and gates every optional shortcut lane.
-        STATE_MACHINE_GESTURES = {"point", "pinch", "pinch_hold"}
-        pointer_gesture = gesture
-        allow_combo = True
-        allow_optional_shortcuts = True
-        if intent_decision is not None:
-            pointer_gesture = (
-                intent_decision.effective_pointer_gesture
-                if intent_decision.allow_pointer
-                else None
-            )
-            allow_combo = intent_decision.allow_combo
-            allow_optional_shortcuts = intent_decision.allow_combo
-
-        if not allow_combo:
-            # Never retain a partial sequence while a pointer intent owns the
-            # hand: it could otherwise complete after the pointer interaction.
-            self.combo_detector.reset()
-        elif gesture not in STATE_MACHINE_GESTURES and gesture != "none":
-            # Neutral is a rearm boundary, never a static-combo input.
-            combo_result = self.combo_detector.update(gesture, timestamp=now)
-            if combo_result:
-                action = combo_result["action"]
-                hotkey = combo_result.get("hotkey", "") or hotkey
-                dispatch_result = self.action_coordinator.dispatch(
-                    ActionRequest(
-                        action=action,
-                        x=screen_x,
-                        y=screen_y,
-                        scroll_amount=speed,
-                        hotkey=hotkey,
-                        gesture=gesture,
-                    )
-                )
-                self._note_episode_action(action, now)
-                self._update_hud_after_dispatch(action, dispatch_result, (screen_x, screen_y))
-                if dispatch_result.executed and intent_decision is not None:
-                    self.intent_arbiter.mark_shortcut_committed()
-                return None
-
-        # Only the arbitrated core label may drive mouse state transitions.
-        if pointer_gesture in STATE_MACHINE_GESTURES:
-            result = self.action_machine.update(
-                pointer_gesture, (screen_x, screen_y), pinch_info, timestamp=now
-            )
-            action = result['action']
-            exec_x, exec_y = result['pos']
-            is_locked = result.get('is_locked', False)
-            dispatch_gesture = pointer_gesture
-        elif allow_optional_shortcuts:
-            action = self.config.get_gesture_action(gesture)
-            exec_x, exec_y = screen_x, screen_y
-            is_locked = False
-            dispatch_gesture = gesture
-        else:
-            action = "none"
-            exec_x, exec_y = screen_x, screen_y
-            is_locked = False
-            dispatch_gesture = gesture
-
-        # Accessibility target semantics can refine optional commands, but never
-        # replace the deterministic pointer/click/drag lifecycle. A target must
-        # first be deliberately pointed at before its contextual command arms.
-        context = None
-        context_cfg = self.config.get("context_aware") or {}
-        if (
-            allow_optional_shortcuts
-            and target_detected
-            and context_cfg.get("enabled", True)
-            and context_cfg.get("intent_actions_enabled", True)
-        ):
-            try:
-                context = self._cached_context(screen_x, screen_y)
-                intent = self.contextual_intent_controller.observe(
-                    context, gesture=gesture, now=now
-                )
-                if intent is not None:
-                    contextual_label = intent.label
-                if intent is not None and gesture not in STATE_MACHINE_GESTURES and not intent.requires_confirmation:
-                    action = intent.action
-                    contextual_target_id = context.target_id
-            except Exception:
-                context = None
-                contextual_label = ""
-                contextual_target_id = ""
-
-        if action in {None, "", "none"}:
-            # A disabled ordinary binding is a no-op, but it reaches this point
-            # so a verified contextual target may safely refine it first.
-            return None
-
-        # 持续性动作：每帧都需要执行
-        CONTINUOUS_ACTIONS = {
-            "move_cursor", "drag", "drag_start", "drag_end",
-            "scroll_up", "scroll_down", "scroll_left", "scroll_right"
-        }
-
-        # Detect gesture stability against the same frame timestamp.
-
-        # 检测手势变化，记录变化时间
-        if gesture != self.last_stable_gesture:
-            self.last_gesture_change_time = now
-            self.last_stable_gesture = gesture
-            # 手势变化时重置执行记录，允许新手势执行动作
-            self.last_executed_gesture = "none"
-            self.last_executed_action = "none"
-
-        # 一次性动作需要等待手势稳定期
-        if action not in CONTINUOUS_ACTIONS:
-            # 检查是否在手势稳定期内
-            if self.last_gesture_change_time is not None:
-                elapsed = now - self.last_gesture_change_time
-                if elapsed < self.gesture_grace_period:
-                    # 手势刚变化，等待稳定期结束再执行
-                    return None
-
-            # 同一手势同一动作只执行一次
-            if gesture == self.last_executed_gesture and action == self.last_executed_action:
-                return None
-
-            # 记录本次执行
-            self.last_executed_gesture = gesture
-            self.last_executed_action = action
-        else:
-            # 持续性动作，重置记录
-            self.last_executed_gesture = "none"
-            self.last_executed_action = "none"
-
-        dispatch_result = self.action_coordinator.dispatch(
-            ActionRequest(
-                action=action,
-                x=exec_x,
-                y=exec_y,
-                scroll_amount=speed,
-                hotkey=hotkey,
-                gesture=dispatch_gesture,
-                core_pointer=dispatch_gesture in STATE_MACHINE_GESTURES,
-                contextual=bool(contextual_target_id),
-                expected_target_id=contextual_target_id,
-            )
+        outcomes = engine.execute_action(
+            gesture, pos, frame_shape, pinch_info, target_detected=target_detected,
+            intent_decision=intent_decision, timestamp=now,
         )
-        self._note_episode_action(action, now)
-        self._update_hud_after_dispatch(
-            action, dispatch_result, (exec_x, exec_y), is_locked=is_locked, now=now
-        )
-        self._record_telemetry_action(
-            action=action,
-            executed=dispatch_result.executed,
-            gesture=gesture,
-            context=context,
-            x=exec_x,
-            y=exec_y,
-            latency_ms=max(0.0, (time.monotonic() - now) * 1000.0),
-        )
-        if dispatch_result.executed and contextual_label:
-            self.hud.show_contextual(contextual_label, now)
-
-        # 返回锁定状态（用于视觉反馈）
-        if is_locked and exec_x and exec_y:
-            # 将屏幕坐标转回帧坐标
-            frame_pos = self.pointer_mapper.unmap(
-                (exec_x, exec_y), (w, h), self.screen_bounds
-            ) or (exec_x, exec_y)
-            return {'is_locked': True, 'pos': frame_pos}
+        self._copy_replay_state(engine)
+        for outcome in outcomes:
+            request = outcome.request
+            self._update_hud_after_dispatch(request.action, outcome.result, (request.x, request.y),
+                                            is_locked=engine._locked_position is not None, now=now)
+            if request.contextual and outcome.result.executed:
+                self.hud.show_contextual(self._action_label(request.action), now)
+        if engine._locked_position is not None:
+            h, w = frame_shape[:2]
+            frame_pos = engine.pointer_mapper.unmap(engine._locked_position, (w, h), engine.screen_bounds)
+            return {"is_locked": True, "pos": frame_pos or engine._locked_position}
         return None
 
     def _update_hud_after_dispatch(self, action, result, anchor, is_locked=False, now=None):
@@ -2245,6 +2432,10 @@ class MainWindow(QMainWindow):
     def _render_hud(self, timestamp=None):
         import time
 
+        if (self.is_running and getattr(self, "control_runtime", None) is None
+                and self.action_coordinator.input_guard.consume_interruption()):
+            self._fail_closed_control_boundary()
+            self._refresh_control_session_status()
         now = time.monotonic() if timestamp is None else timestamp
         state = self.hud.current_state(now)
         if state is HudState.HIDDEN:
@@ -2285,12 +2476,19 @@ class MainWindow(QMainWindow):
         self.video_label.setPixmap(scaled)
 
     def _update_power_mode(self, landmarks):
-        """更新节能模式 - 分层节能策略"""
+        """更新节能模式 - 分层节能策略
+
+        The mode used to change only the status label while capture and inference
+        kept running at full rate, so the UI claimed to be saving power that it
+        was still spending. Each mode now also throttles the worker.
+        """
+        previous = self.power_mode
         if landmarks:
             # 检测到手，立即恢复正常模式
             if self.power_mode != "normal":
                 self.power_mode = "normal"
             self.no_hand_frames = 0
+            self._apply_power_throttle(previous)
             return
 
         self.no_hand_frames += 1
@@ -2314,6 +2512,26 @@ class MainWindow(QMainWindow):
         elif self.no_hand_frames > self.DEEP_SLEEP_THRESHOLD and self.power_mode == "sleep":
             if self.ir_detector:
                 self.power_mode = "deep_sleep"
+        self._apply_power_throttle(previous)
+
+    def _apply_power_throttle(self, previous_mode):
+        """Push the current mode's frame interval to the capture worker."""
+        if self.power_mode == previous_mode:
+            return
+        worker = self.video_worker
+        setter = getattr(worker, "set_min_frame_interval", None)
+        if setter is None:
+            return
+        setter(self._POWER_FRAME_INTERVALS.get(self.power_mode, 0.0))
+
+    def _set_preview_status_dot(self, semantic):
+        """Colour the preview footer dot: live, tracking, or idle."""
+        dot = getattr(self, "preview_status_dot", None)
+        if dot is None:
+            return
+        dot.setProperty("semantic", semantic)
+        dot.style().unpolish(dot)
+        dot.style().polish(dot)
 
     def _get_status_text(self, detected):
         """Return a fixed localized runtime status without exposing raw state values."""
@@ -2435,10 +2653,14 @@ class MainWindow(QMainWindow):
         if was_running:
             # A paused camera stream can no longer observe pinch release, so
             # release native drag before opening the modal configuration UI.
+            if self._stop_video_worker() is False:
+                self.is_running = False
+                self._status_override_key = "main.control_unavailable"
+                self._refresh_precision_console()
+                return
             self.action_coordinator.stop()
             self.action_machine.reset()
             self._reset_gesture_observation_state()
-            self._stop_video_worker()
 
         try:
             dialog = SettingsDialog(
@@ -2458,7 +2680,9 @@ class MainWindow(QMainWindow):
                 # The policy is part of the live dispatch boundary; only an
                 # accepted Save may replace it. Cancel leaves the old provider
                 # and action coordinator untouched.
-                self._refresh_platform_services()
+                if self._refresh_platform_services() is False:
+                    self.is_running = False
+                    return
                 self._refresh_runtime_configuration()
                 self._refresh_control_session_from_config()
                 self._refresh_dynamic_shortcuts_from_config()
@@ -2470,17 +2694,85 @@ class MainWindow(QMainWindow):
                     opacity=feedback.get("opacity", 0.92),
                     scale=feedback.get("scale", 1.0),
                 )
-        except Exception:
+        except Exception as error:  # noqa: BLE001 - a broken dialog must not take the app down
+            self._report_settings_failure(error)
             self._status_override_key = "main.control_unavailable"
             self._refresh_precision_console()
         finally:
             if was_running and self.is_running:
-                if self._start_video_worker() and result:
-                    self._start_hold_shortcut_monitor()
+                # Restarting the monitor must not depend on the dialog's return
+                # value. _refresh_platform_services() already stopped it, so
+                # gating this on `result` left hold-to-activate silently dead
+                # for the rest of the session whenever Save raised.
+                if self._start_video_worker():
+                    if self._start_hold_shortcut_monitor() is False:
+                        self.is_running = False
+                        self._stop_video_worker()
+                        self._stop_hold_shortcut_monitor()
+                        self._hold_shortcut_error_key = "main.hold_shortcut_unavailable"
+                        self._refresh_precision_console()
+                else:
+                    self.is_running = False
+                    self._stop_hold_shortcut_monitor()
+                    self._status_override_key = "main.control_unavailable"
+                    self._refresh_precision_console()
 
+
+    def _restore_window_geometry(self):
+        """Reopen at the size and position the user left the window at."""
+        ui = self.config.get("ui") or {}
+        width = ui.get("window_width")
+        height = ui.get("window_height")
+        try:
+            width, height = int(width), int(height)
+        except (TypeError, ValueError):
+            width = height = 0
+        if width <= 0 or height <= 0:
+            self.resize(1280, 780)
+            return
+        # Persisted values can be larger than the current display (unplugged
+        # monitor, changed resolution); clamp so the window cannot open offscreen.
+        available = self.screen().availableGeometry() if self.screen() else None
+        if available is not None:
+            width = min(width, available.width())
+            height = min(height, available.height())
+        self.resize(width, height)
+
+    def _persist_window_geometry(self):
+        """Store the frame so the next launch does not reset to the default."""
+        if self.isMaximized() or self.isFullScreen():
+            return
+        self.config.set("ui", "window_width", self.width())
+        self.config.set("ui", "window_height", self.height())
+
+    def _report_settings_failure(self, error):
+        """Write a diagnosable one-liner for a failed settings dialog.
+
+        The message is deliberately not printed: an exception raised while
+        reading the accessibility tree can carry raw UI content, and this app
+        never prints that. The exception type and the frame it came from are
+        enough to locate the fault without echoing user data.
+        """
+        frames = traceback.extract_tb(error.__traceback__)
+        location = f"{frames[-1].filename.rsplit('/', 1)[-1]}:{frames[-1].lineno}" if frames else "?"
+        print(f"[settings] {type(error).__name__} in {location}")
 
     def closeEvent(self, event):
         """关闭窗口时释放资源"""
+        self.is_running = False
+        if self._stop_video_worker() is False:
+            # Keep the telemetry store and input owner alive until their
+            # bounded shutdown completes; a queued retry never blocks Qt.
+            event.ignore()
+            QTimer.singleShot(100, self.close)
+            return
+        # Remember the frame before teardown so the next launch reopens at it.
+        try:
+            self._persist_window_geometry()
+            self.config.save()
+        except OSError:
+            # A read-only data directory must not block quitting.
+            pass
         self.action_coordinator.stop()
         self._reset_gesture_observation_state()
         self._stop_hold_shortcut_monitor()
@@ -2489,5 +2781,15 @@ class MainWindow(QMainWindow):
         self.overlay.close()
         if self.ir_detector:
             self.ir_detector.stop()
-        self._stop_video_worker()
+        self.action_coordinator.close()
+        # Rows are committed every 32 writes or 2 seconds, so the tail of the
+        # session is still buffered. Closing flushes it; without this the very
+        # episodes the tuner reads at the next launch can be missing.
+        telemetry = getattr(self, "telemetry", None)
+        if telemetry is not None:
+            try:
+                telemetry.close()
+            except (OSError, RuntimeError):
+                pass
+            self.telemetry = None
         event.accept()

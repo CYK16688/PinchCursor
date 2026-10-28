@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from utils.config_manager import user_data_dir
+
 if sys.platform == "win32":
     import msvcrt
 else:
@@ -15,8 +17,10 @@ class SingleInstanceGuard:
     """Own one non-blocking advisory lock without deleting another process's file."""
 
     def __init__(self, lock_path: Path | str | None = None):
+        # Shares user_data_dir() with the settings file so a frozen build keeps
+        # all of its writable state in one per-user directory, never in the bundle.
         self.lock_path = Path(lock_path) if lock_path is not None else (
-            Path.home() / "Library" / "Application Support" / "PinchCursor" / "pinchcursor.lock"
+            Path(user_data_dir()) / "pinchcursor.lock"
         )
         self._handle = None
         self._acquired = False

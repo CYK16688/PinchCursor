@@ -8,7 +8,7 @@
 #   pyinstaller --version      # must be installed for this step
 #   pwsh .\scripts\build_windows.ps1
 #
-# Output: dist\Gesture Control\Gesture Control.exe (onedir, no console window).
+# Output: dist\PinchCursor\PinchCursor.exe (onedir, no console window).
 
 $ErrorActionPreference = "Stop"
 
@@ -26,9 +26,10 @@ if (Test-Path "dist") { Remove-Item -Recurse -Force "dist" }
 
 # The shared spec owns the module list, Qt excludes, and data files.
 $env:PYTHONPATH = ""
-& $Python -m PyInstaller --noconfirm --clean "Gesture Control.spec"
+& $Python -m PyInstaller --noconfirm --clean "PinchCursor.spec"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-$ExePath = Join-Path $Root "dist\Gesture Control\Gesture Control.exe"
+$ExePath = Join-Path $Root "dist\PinchCursor\PinchCursor.exe"
 if (-not (Test-Path $ExePath)) {
     Write-Error "Build failed: $ExePath was not produced."
 }

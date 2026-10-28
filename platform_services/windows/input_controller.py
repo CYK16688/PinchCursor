@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from platform_services.contracts import ActionRequest, ActionResult
+from platform_services.contracts import ActionRequest, ActionResult, normalize_cursor_position
 from utils.windows_hotkey_validation import normalize_windows_hotkey
 
 
@@ -51,6 +51,13 @@ class WindowsInputController:
     @property
     def supported_actions(self) -> frozenset[str]:
         return SUPPORTED_ACTIONS
+
+    def cursor_position(self) -> tuple[float, float] | None:
+        try:
+            getter = getattr(self.native, "cursor_position", None)
+            return normalize_cursor_position(getter()) if callable(getter) else None
+        except Exception:
+            return None
 
     def execute(self, request: ActionRequest) -> ActionResult:
         if request.action not in self.supported_actions:

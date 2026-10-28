@@ -41,6 +41,7 @@ class ControlSession:
         self.state = SessionState.INACTIVE
         self._activation_started_at: float | None = None
         self._last_hand_at: float | None = None
+        self._gesture_latched = False
 
     def update(
         self,
@@ -76,10 +77,18 @@ class ControlSession:
             ActivationMode.HOLD_SHORTCUT,
             ActivationMode.GESTURE_OR_SHORTCUT,
         }
-        if self.activation_template is not None:
+        if not has_hand:
+            self._activation_started_at = None
+            gesture_active = False
+        elif self.activation_template is not None:
             gesture_active = self._template_activation_ready(landmarks, now)
         else:
             gesture_active = self._gesture_activation_ready(gesture, now)
+
+        # A completed activation is a session event. The user must be able to
+        # leave the activation pose and point without undoing that event.
+        if gesture_active:
+            self._gesture_latched = True
 
         if self.state is SessionState.INACTIVE:
             if shortcut_active or gesture_active:
@@ -89,7 +98,7 @@ class ControlSession:
         if self.mode is ActivationMode.HOLD_SHORTCUT and not shortcut_held:
             self.reset()
             return self.state
-        if self.mode is ActivationMode.GESTURE_OR_SHORTCUT and not shortcut_held and self._activation_started_at is None:
+        if self.mode is ActivationMode.GESTURE_OR_SHORTCUT and not shortcut_held and not self._gesture_latched:
             self.reset()
             return self.state
         if gesture == "point" and has_hand:
@@ -103,6 +112,7 @@ class ControlSession:
         self.state = SessionState.INACTIVE
         self._activation_started_at = None
         self._last_hand_at = None
+        self._gesture_latched = False
 
     def _template_activation_ready(self, landmarks, now: float) -> bool:
         if self.mode not in {ActivationMode.GESTURE, ActivationMode.GESTURE_OR_SHORTCUT}:

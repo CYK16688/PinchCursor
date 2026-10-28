@@ -104,8 +104,10 @@ class HandDetector(BaseHandDetector):
                 x, y, z = float(lm.x), float(lm.y), float(lm.z)
                 if not all(isfinite(value) for value in (x, y, z)):
                     return None
-                # 返回(x像素, y像素, z深度)
-                landmarks.append((int(x * w), int(y * h), z))
+                # Keep sub-pixel evidence until rendering or native input. At
+                # 640 camera pixels across a 2560-point display, truncating
+                # here would discard four screen points of aiming precision.
+                landmarks.append((x * w, y * h, z))
         except (AttributeError, TypeError, ValueError, OverflowError):
             return None
         return landmarks

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from platform_services.contracts import normalize_cursor_position
 from utils.hotkey_validation import MACOS_KEYCODES, normalize_hotkey
 
 
@@ -203,7 +204,18 @@ class MacOSNativeFacade:
         view = objc.objc_object(c_void_p=int(widget.winId()))
         return view.window() if view is not None else None
 
-    def post_mouse(self, event_type: str, x: int, y: int, button: str) -> None:
+    def cursor_position(self) -> tuple[float, float] | None:
+        """Read Quartz screen coordinates without creating or posting mouse input."""
+        try:
+            event = self.quartz.CGEventCreate(None)
+            if event is None:
+                return None
+            point = self.quartz.CGEventGetLocation(event)
+            return normalize_cursor_position((point.x, point.y))
+        except Exception:
+            return None
+
+    def post_mouse(self, event_type: str, x: int, y: int, button: str, click_count: int = 1) -> None:
         event_map = {
             "move": self.quartz.kCGEventMouseMoved,
             "left_down": self.quartz.kCGEventLeftMouseDown,
@@ -222,6 +234,19 @@ class MacOSNativeFacade:
         event = self.quartz.CGEventCreateMouseEvent(
             None, event_map[event_type], (x, y), button_map[button]
         )
+        if event is None:
+            # CGEventCreate* returns NULL once the process may no longer post
+            # events (Accessibility revoked mid-session). Posting NULL raises
+            # from inside the HID tap; a plain failure the caller can handle is
+            # the honest answer.
+            raise PermissionError("mouse event could not be created")
+        if click_count > 1:
+            # macOS decides "double click" from the click state carried on the
+            # event, not from two consecutive down/up pairs. Without this the OS
+            # and every app listening for a double click only see two singles.
+            self.quartz.CGEventSetIntegerValueField(
+                event, self.quartz.kCGMouseEventClickState, click_count
+            )
         self.quartz.CGEventPost(self.quartz.kCGHIDEventTap, event)
 
     def post_scroll(self, vertical: int, horizontal: int) -> None:
@@ -233,6 +258,8 @@ class MacOSNativeFacade:
             event = self.quartz.CGEventCreateScrollWheelEvent(
                 None, self.quartz.kCGScrollEventUnitLine, 1, vertical
             )
+        if event is None:
+            raise PermissionError("scroll event could not be created")
         self.quartz.CGEventPost(self.quartz.kCGHIDEventTap, event)
 
     def post_hotkey(self, hotkey: str) -> None:

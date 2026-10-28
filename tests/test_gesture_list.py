@@ -196,3 +196,42 @@ def test_reset_does_not_reenable_an_unsupported_default_action(tmp_path, monkeyp
         assert action.currentData() == "none"
     finally:
         dialog.close()
+
+
+def test_the_click_versus_drag_window_is_adjustable():
+    """hold_time decides whether a pinch is a click or a drag; it must be editable.
+
+    It used to be read-only text, so the single number that governs whether
+    clicking feels reliable could not be changed from inside the app at all.
+    """
+    from copy import deepcopy
+
+    from gui.gesture_list import GestureList
+    from utils.config_manager import DEFAULT_CONFIG, ConfigManager
+
+    gestures = deepcopy(DEFAULT_CONFIG["gestures"])
+    gestures["pinch_hold"]["hold_time"] = 0.3
+    widget = GestureList(gestures)
+    spin = getattr(widget, "_hold_time_spin", None)
+
+    assert spin is not None, "the hold time must be a control, not a label"
+    assert spin.value() == 0.3
+    # The useful band for a click-versus-drag boundary; below ~0.15 s every
+    # press becomes a drag, above ~1 s a drag takes too long to start.
+    assert 0.1 <= spin.minimum() <= 0.2
+    assert 0.6 <= spin.maximum() <= 1.2
+
+
+def test_an_adjusted_hold_time_is_persisted(tmp_path):
+    from copy import deepcopy
+
+    from gui.gesture_list import GestureList
+    from utils.config_manager import DEFAULT_CONFIG, ConfigManager
+
+    widget = GestureList(deepcopy(DEFAULT_CONFIG["gestures"]))
+    widget._hold_time_spin.setValue(0.55)
+
+    config = ConfigManager(config_path=tmp_path / "settings.json")
+    widget.apply_to_config(config)
+
+    assert config.get_gesture("pinch_hold")["hold_time"] == 0.55
