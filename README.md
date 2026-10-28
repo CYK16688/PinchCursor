@@ -1,5 +1,7 @@
 # PinchCursor
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 **Turn your Mac into a touchless workstation.** PinchCursor reads your hand from the built‑in camera and drives the pointer — move, click, drag, scroll, run shortcuts — while keeping every decision deterministic, local, and reversible.
 
 <p align="center">
