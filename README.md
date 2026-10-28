@@ -4,6 +4,8 @@
 
 **Control a Mac with continuous hand gestures.** PinchCursor turns webcam hand tracking into pointer movement, clicks, dragging and scrolling, while keeping intent decisions deterministic, local and interruptible.
 
+Related search terms: webcam mouse, virtual mouse, touchless mouse, air mouse, hand gesture mouse, pinch-to-click and MediaPipe hand tracking.
+
 <p align="center">
   <img src="gui/resources/pinchcursor.png" width="112" alt="PinchCursor icon">
 </p>
@@ -131,6 +133,23 @@ env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
 ```
 
 Synthetic landmark replays cover click, double-click, drag, release, scroll, tracking loss, stale frames, camera geometry changes, fine control and 15/30/60 FPS paths. Native input uses fake OS sinks. Real-camera accuracy, physical mouse equivalence, actual unplug recovery and long-session comfort still require device acceptance; details are in [VALIDATION.md](docs/VALIDATION.md).
+
+## Ecosystem and related projects
+
+PinchCursor is a macOS-specific implementation focused on continuous pinch intent, pre-closure click targeting and watchdog-protected native input. These projects are useful dependencies, prior art or indexes; a reference does not imply compatibility, endorsement or equivalent behavior.
+
+| Project | Relationship |
+|---|---|
+| [MediaPipe](https://github.com/google-ai-edge/mediapipe) · ~37.4k stars | Hand landmark inference used by the runtime |
+| [OpenCV](https://github.com/opencv/opencv) · ~91.4k stars | Camera and image-processing foundation |
+| [PyObjC](https://github.com/ronaldoussoren/pyobjc) · ~827 stars | macOS accessibility and native event bridge |
+| [Barehands](https://github.com/jaredrhod/barehands) · ~1.1k stars | Adjacent webcam hand-controlled interface |
+| [Gesture-Controlled-Virtual-Mouse](https://github.com/Viral-Doshi/Gesture-Controlled-Virtual-Mouse) · ~878 stars | Popular Python/MediaPipe virtual-mouse baseline |
+| [hand-gesture-recognition-using-mediapipe](https://github.com/Kazuhito00/hand-gesture-recognition-using-mediapipe) · ~770 stars | Hand-landmark gesture-classification reference |
+| [awesome-hands-control](https://github.com/RylanBot/awesome-hands-control) · ~350 stars | Curated index of hand-controlled software |
+| [NonMouse](https://github.com/takeyamayuki/NonMouse) · ~202 stars | Desk-oriented webcam gesture mouse |
+
+Star counts are approximate and were checked on 2026-10-29.
 
 ## Status
 

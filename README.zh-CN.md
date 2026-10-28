@@ -4,6 +4,8 @@
 
 **用连续手势控制 Mac。** PinchCursor 将摄像头手部追踪转换为指针移动、点击、拖动和滚动；意图判断保持确定性、本地运行，并且随时可以中断。
 
+相关检索词：摄像头鼠标、虚拟鼠标、隔空鼠标、手势鼠标、捏合点击、MediaPipe 手部追踪。
+
 <p align="center">
   <img src="gui/resources/pinchcursor.png" width="112" alt="PinchCursor 图标">
 </p>
@@ -137,6 +139,23 @@ env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
 ```
 
 合成关键点回放覆盖点击、双击、拖动、释放、滚动、丢手、过期帧、摄像头几何变化、精细控制以及 15/30/60 FPS 链路。原生输入使用假 OS 接收端。真实摄像头准确度、实体鼠标等价性、实际拔插恢复和长时间舒适度仍需设备验收，详见[验证文档](docs/VALIDATION.md)。
+
+## 生态与相关项目
+
+PinchCursor 是面向 macOS 的实现，重点是连续捏合意图、闭合前点击定位和受 watchdog 保护的原生输入。以下项目属于基础依赖、相关实践或索引；建立引用不代表兼容、背书或功能等价。
+
+| 项目 | 关联 |
+|---|---|
+| [MediaPipe](https://github.com/google-ai-edge/mediapipe) · 约 3.74 万 Star | 运行时使用的手部关键点推理框架 |
+| [OpenCV](https://github.com/opencv/opencv) · 约 9.14 万 Star | 摄像头采集和图像处理基础 |
+| [PyObjC](https://github.com/ronaldoussoren/pyobjc) · 约 827 Star | macOS 无障碍与原生事件桥接 |
+| [Barehands](https://github.com/jaredrhod/barehands) · 约 1.1k Star | 相似的摄像头手部控制界面 |
+| [Gesture-Controlled-Virtual-Mouse](https://github.com/Viral-Doshi/Gesture-Controlled-Virtual-Mouse) · 约 878 Star | 使用 Python/MediaPipe 的虚拟鼠标实践 |
+| [hand-gesture-recognition-using-mediapipe](https://github.com/Kazuhito00/hand-gesture-recognition-using-mediapipe) · 约 770 Star | 基于手部关键点的手势分类参考 |
+| [awesome-hands-control](https://github.com/RylanBot/awesome-hands-control) · 约 350 Star | 手势控制软件资源索引 |
+| [NonMouse](https://github.com/takeyamayuki/NonMouse) · 约 202 Star | 面向桌面使用的摄像头手势鼠标 |
+
+Star 数为约数，核对于 2026-10-29。
 
 ## 状态
 
