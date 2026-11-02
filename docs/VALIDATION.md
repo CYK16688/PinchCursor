@@ -12,7 +12,7 @@ env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
 Latest automated result (2026-10-30, exit code checked):
 
 ```text
-1434 passed in 141.43s
+1433 passed in 141.43s
 compileall passed
 exit code 0
 ```

@@ -8,7 +8,6 @@ from gui import main_window
 SHARED = (
     "_record_candidates",
     "_snap_cursor_position",
-    "_freeze_pointer_for_pinch",
     "_restore_static_templates",
     "_clear_dynamic_shortcut_observation",
 )

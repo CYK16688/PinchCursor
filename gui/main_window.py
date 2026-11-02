@@ -531,14 +531,6 @@ class MainWindow(QMainWindow):
             self.telemetry.close()
         self.telemetry = TelemetryStore(path, enabled=enabled)
 
-    # Synchronous replay uses the engine implementation, so legacy fixtures
-    # and live control cannot silently diverge.
-    _observe_pinch_episode = ControlEngine._observe_pinch_episode
-
-    _note_episode_action = ControlEngine._note_episode_action
-
-    _apply_dynamics = ControlEngine._apply_dynamics
-
     def _cached_context(self, x, y):
         """Return the AX context, reusing the last hit for a few frames.
 
@@ -559,8 +551,6 @@ class MainWindow(QMainWindow):
         context = self.platform_services.context_provider.get_context(x, y)
         self._context_cache = (x, y, time.monotonic(), context)
         return context
-
-    _record_telemetry_action = ControlEngine._record_telemetry_action
 
     def _refresh_pointer_assist(self):
         """Rebuild the aiming assist and attach it to the lock transition.
@@ -1676,8 +1666,6 @@ class MainWindow(QMainWindow):
     # Lanes that fire continuously would rewrite this row every frame and make it
     # unreadable; only deliberate, discrete actions are worth remembering.
     _CONTINUOUS_ACTIONS = frozenset({"move_cursor", "drag", "none", ""})
-
-    _freeze_pointer_for_pinch = ControlEngine._freeze_pointer_for_pinch
 
     def _record_last_action(self, action):
         """Remember one executed action for the session card."""

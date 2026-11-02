@@ -49,7 +49,7 @@ useful during review.
 - A corrupted batch of words in the README (`mailbox`, `context`, `text`,
   `index`, `experimental`, `explicitly` and `requirements.txt` had letters
   replaced) is repaired.
-- The recorded test count matches the suite again (1434 passing).
+- The recorded test count matches the suite again (1433 passing).
 
 ## 0.2.0 — 2026-10-29
 
