@@ -9,10 +9,10 @@ env -u PYTHONPATH .venv/bin/python -m compileall -q core gui platform_services u
 env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
 ```
 
-Latest automated result (2026-10-28, exit code checked):
+Latest automated result (2026-10-30, exit code checked):
 
 ```text
-1353 passed in 115.01s
+1434 passed in 141.43s
 compileall passed
 exit code 0
 ```
@@ -63,7 +63,7 @@ VoiceOver session or real-user usability study was used for this validation.
 
 ### Continuous-control regression evidence
 
-The 2026-10-28 changes were tested locally without opening a physical camera or
+The 2026-10-30 changes were tested locally without opening a physical camera or
 posting native mouse events. The existing detector smoke test still runs real
 MediaPipe inference on an empty image; it does not measure gesture accuracy.
 

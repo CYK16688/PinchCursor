@@ -1,18 +1,17 @@
 """Candidate features, the linear ranker, and the telemetry that trains it."""
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
-from types import SimpleNamespace
-
 from core.assist.features import FEATURE_COUNT, FEATURE_NAMES, build_features
-from core.pointer_mapping import ScreenBounds
-from gui.main_window import MainWindow
-from platform_services.contracts import UIContext
 from core.assist.ranker import LinearRanker
 from core.assist.target_model import Target, TargetModel
+from core.control_engine import ControlEngine
+from core.pointer_mapping import ScreenBounds
 from core.telemetry import TelemetryStore
+from platform_services.contracts import UIContext
 
 SCREEN = (0, 0, 1000, 600)
 
@@ -174,7 +173,7 @@ class _ProbeProvider:
 
 
 def _window(bounds, contexts, *, ranker=None, mode="bayesian"):
-    window = MainWindow.__new__(MainWindow)
+    window = ControlEngine.__new__(ControlEngine)
     window.target_model = TargetModel()
     window.ranker = ranker
     window.assist_mode = mode
@@ -202,7 +201,7 @@ def test_shadow_mode_never_moves_the_cursor():
     contexts = [_context(60, 95), _context(110, 95)]
     window = _window((0, 0, 1000, 600), contexts, ranker=_dx_ranker(), mode="shadow")
 
-    result = MainWindow._snap_cursor_position(window, (95, 95))
+    result = ControlEngine._snap_cursor_position(window, (95, 95))
 
     # The deterministic policy wins in shadow mode: A, inset 2 px on y.
     assert result == (95, 97)
@@ -212,7 +211,7 @@ def test_ranker_mode_uses_the_model_choice():
     contexts = [_context(60, 95), _context(110, 95)]
     window = _window((0, 0, 1000, 600), contexts, ranker=_dx_ranker(), mode="ranker")
 
-    result = MainWindow._snap_cursor_position(window, (95, 95))
+    result = ControlEngine._snap_cursor_position(window, (95, 95))
 
     # The tailored model prefers B, and B is within the snap distance.
     assert result is not None
@@ -228,7 +227,7 @@ def test_a_chaos_ranker_falls_back_to_the_raw_position():
     window = _window((0, 0, 1000, 600), contexts, ranker=Exploding(), mode="ranker")
 
     # The exception must not escape; the deterministic path still answers.
-    assert MainWindow._snap_cursor_position(window, (95, 95)) == (95, 97)
+    assert ControlEngine._snap_cursor_position(window, (95, 95)) == (95, 97)
 
 
 def test_candidates_are_disabled_with_the_rest_of_telemetry(tmp_path):

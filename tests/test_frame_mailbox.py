@@ -6,7 +6,7 @@ import time
 import numpy as np
 from PySide6.QtWidgets import QApplication
 
-from core.mediapipe_worker import LandmarkFrame, MediaPipeVideoWorker
+from capture.mediapipe_worker import LandmarkFrame, MediaPipeVideoWorker
 
 
 def test_slow_consumer_receives_only_latest_frame_with_one_pending_notification():

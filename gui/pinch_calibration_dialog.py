@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout
-)
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout
 
 from .i18n import tr
 from .pinch_calibration_flow import CalibrationResult, CalibrationSession
@@ -91,8 +89,8 @@ class PinchCalibrationDialog(QDialog):
             self._connect_and_start_worker(worker)
             return worker
 
+        from capture.mediapipe_worker import MediaPipeVideoWorker
         from core.detector_factory import create_detector
-        from core.mediapipe_worker import MediaPipeVideoWorker
         from platform_services.camera_selection import open_configured_camera
         from platform_services.factory import create_platform_services
         from utils.camera_utils import open_camera

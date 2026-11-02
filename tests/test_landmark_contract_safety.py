@@ -8,8 +8,8 @@ import numpy as np
 import pytest
 from PySide6.QtWidgets import QApplication
 
+from capture.mediapipe_worker import LandmarkFrame
 from core.hand_detector import HandDetector
-from core.mediapipe_worker import LandmarkFrame
 from gui import main_window
 from gui.i18n import translate
 from platform_services.contracts import ActionRequest, ActionResult
@@ -71,7 +71,6 @@ def test_main_window_fails_closed_when_a_worker_frame_breaks_the_landmark_contra
         window.is_running = True
         window.action_coordinator.stop = lambda: released.append(True) or ActionResult(True)
         window.action_coordinator.dispatch = lambda request: dispatched.append(request) or ActionResult(True)
-        window._update_power_mode = lambda _landmarks: None
         window._check_edge_lost = lambda _landmarks, _now: None
         window._refresh_control_session_status = lambda: None
         window._get_status_text = lambda _detected: "test"
@@ -129,7 +128,6 @@ def test_repeated_invalid_landmark_frames_emit_only_one_native_drag_release(monk
         controller.execute(ActionRequest(action="drag_start", x=10, y=20))
         window.is_running = True
         window.action_coordinator.stop = controller.release_drag
-        window._update_power_mode = lambda _landmarks: None
         window._check_edge_lost = lambda _landmarks, _now: None
         window._refresh_control_session_status = lambda: None
         window._get_status_text = lambda _detected: "test"

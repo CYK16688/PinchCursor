@@ -5,12 +5,19 @@ from enum import StrEnum
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSizePolicy, QVBoxLayout
+    QComboBox,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
 )
 
 from gui.i18n import tr
 from gui.theme import use_styled_background
-from core.dynamic_gesture_template import DynamicGestureMatcher
+from utils.dynamic_gesture_template import DynamicGestureMatcher
 from utils.hotkey_validation import normalize_hotkey
 
 

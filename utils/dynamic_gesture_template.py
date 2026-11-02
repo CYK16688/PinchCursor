@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import re
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from math import inf, isfinite, sqrt
-import re
 from time import monotonic
-from typing import Iterable, Sequence
 from uuid import uuid4
 
 FeatureFrame = tuple[float, ...]
@@ -331,7 +331,7 @@ class DynamicGestureMatcher:
         try:
             displacements = [
                 self._frame_distance(previous, current)
-                for previous, current in zip(sequence, sequence[1:])
+                for previous, current in zip(sequence, sequence[1:], strict=False)
             ]
         except (TypeError, ValueError):
             return 0.0
@@ -445,10 +445,10 @@ class DynamicGestureMatcher:
 
     @staticmethod
     def _euclidean(first: Sequence[float], second: Sequence[float]) -> float:
-        return sqrt(sum((a - b) ** 2 for a, b in zip(first, second)))
+        return sqrt(sum((a - b) ** 2 for a, b in zip(first, second, strict=False)))
 
     @staticmethod
     def _frame_distance(first: FeatureFrame, second: FeatureFrame) -> float:
         if len(first) != len(second) or not first:
             return inf
-        return sqrt(sum((a - b) ** 2 for a, b in zip(first, second)) / len(first))
+        return sqrt(sum((a - b) ** 2 for a, b in zip(first, second, strict=False)) / len(first))

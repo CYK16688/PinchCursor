@@ -13,8 +13,8 @@
 
 import time
 from dataclasses import dataclass
-from math import isfinite
 from enum import Enum
+from math import isfinite
 
 
 class ActionState(Enum):
@@ -76,9 +76,6 @@ class ActionStateMachine:
         self.lock_time = None
         self.lock_timeout = 0.5
 
-        # 动作冷却时间
-        self.action_cooldown = 0.5
-        self.last_action_time = 0
         self._last_timestamp = None
 
         # Approach velocity must persist briefly before it can lock a target.
@@ -205,8 +202,6 @@ class ActionStateMachine:
                     self._change_state(ActionState.CLICKING)
                 result['action'] = 'none'
                 result['pos'] = self.last_pos or result['pos']
-            else:
-                self.last_action_time = now
 
         self.last_pos = result['pos']
         result['state'] = self.state
@@ -563,7 +558,6 @@ class ActionStateMachine:
         self._pinch_opened_at = None
         self.lock_time = None
         self._evidence_phase = 'idle'
-        self.last_action_time = 0
         if clear_timestamp:
             self._last_timestamp = None
         self._clear_approach_confirmation()

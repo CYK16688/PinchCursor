@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication
 
 from gui.main_window import MainWindow
 from utils.config_manager import ConfigManager
+from utils.settings import effective_assist
 
 
 @pytest.fixture(scope="module")
@@ -55,7 +56,7 @@ def _click_summary(clicks, misses, snaps=0, mean=None):
 
 
 def test_learned_values_win_over_the_configured_ones():
-    values = MainWindow._effective_assist_values(
+    values = effective_assist(
         {"max_snap_distance": 40.0, "min_confidence": 0.55,
          "learned": {"max_snap_distance": 31.0, "min_confidence": 0.6,
                      "base_max_snap_distance": 40.0, "base_min_confidence": 0.55}}
@@ -65,7 +66,7 @@ def test_learned_values_win_over_the_configured_ones():
 
 
 def test_a_manual_config_change_discards_the_stale_adaptation():
-    values = MainWindow._effective_assist_values(
+    values = effective_assist(
         {"max_snap_distance": 50.0, "min_confidence": 0.55,
          "learned": {"max_snap_distance": 31.0, "min_confidence": 0.6,
                      "base_max_snap_distance": 40.0, "base_min_confidence": 0.55}}
@@ -75,7 +76,7 @@ def test_a_manual_config_change_discards_the_stale_adaptation():
 
 
 def test_malformed_learned_values_fall_back_to_the_config():
-    values = MainWindow._effective_assist_values(
+    values = effective_assist(
         {"max_snap_distance": 40.0, "min_confidence": 0.55,
          "learned": {"max_snap_distance": "oops", "min_confidence": None}}
     )
@@ -171,7 +172,7 @@ def test_a_real_store_summary_drives_the_same_decision(tmp_path):
                      x=100 + index * 40, y=200)
         stamp += 10.0
     # 10 pairs: a click, then a click 0.4 s later on a different control.
-    for index in range(10):
+    for _ in range(10):
         store.record("action", timestamp=stamp, action="left_click", executed=True, x=400, y=300)
         stamp += 0.4
         store.record("action", timestamp=stamp, action="left_click", executed=True, x=900, y=700)

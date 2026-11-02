@@ -2,7 +2,7 @@
 
 import math
 
-from core.dynamic_gesture_template import (
+from utils.dynamic_gesture_template import (
     DynamicGestureMatcher,
     DynamicGestureTemplate,
 )

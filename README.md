@@ -13,7 +13,7 @@ Related search terms: webcam mouse, virtual mouse, touchless mouse, air mouse, h
 <p align="center">
   <img alt="platform" src="https://img.shields.io/badge/platform-macOS%2015%2B-111111">
   <img alt="python" src="https://img.shields.io/badge/python-3.13-3776AB">
-  <img alt="tests" src="https://img.shields.io/badge/tests-1353%20passing-47D7A1">
+  <img alt="tests" src="https://img.shields.io/badge/tests-1434%20passing-47D7A1">
   <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-5E8CFF">
   <img alt="telemetry" src="https://img.shields.io/badge/telemetry-off%20by%20default-8B93A1">
 </p>
@@ -129,7 +129,7 @@ Pinch calibration, recorded gestures and optional target ranking adapt locally. 
 
 ```bash
 env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
-# 1353 passed
+# 1434 passed
 ```
 
 Synthetic landmark replays cover click, double-click, drag, release, scroll, tracking loss, stale frames, camera geometry changes, fine control and 15/30/60 FPS paths. Native input uses fake OS sinks. Real-camera accuracy, physical mouse equivalence, actual unplug recovery and long-session comfort still require device acceptance; details are in [VALIDATION.md](docs/VALIDATION.md).
@@ -156,6 +156,11 @@ Star counts are approximate and were checked on 2026-10-29.
 - macOS is supported; the Windows adapter is experimental.
 - Accessibility aiming works best with native controls and may not engage in Electron or web content.
 - The learned target ranker needs several hundred labelled clicks before it is useful.
+
+## Contributing and change history
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) - setup, the layering contract, and the evidence a change has to carry.
+- [CHANGELOG.md](CHANGELOG.md) - what changed in each release.
 
 ## License
 

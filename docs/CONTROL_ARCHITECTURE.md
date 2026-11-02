@@ -11,6 +11,7 @@ a physical mouse; those require the device acceptance described below.
 | Owner | Responsibility | Boundary |
 |---|---|---|
 | Camera worker | Capture, mirror, MediaPipe VIDEO inference, timestamped landmarks | Submit directly to the control mailbox; no GUI event delivery required |
+| IR presence worker | Optional camera discovery, startup, sampling and release | Separate owner; fresh cached samples only; blocking IR never blocks RGB or Qt |
 | ControlRuntime | One decision thread, one pending observation, one latest preview | Discards superseded pending observations; no backlog of stale commands |
 | ControlEngine | Calibration, filtering, session gate, arbitration, pointer/scroll/shortcut state, dispatch | Configuration copied at construction; only its owner mutates history |
 | InputGuard | Serialize native input and release, check evidence freshness, recover failed releases | Independent 25 ms polling; 250 ms evidence lease; stop forbids renewal |
@@ -19,10 +20,12 @@ a physical mouse; those require the device acceptance described below.
 | Qt main thread | Settings, preview, labels, HUD | Render immutable state and bounded discrete outcomes; never drive live input |
 
 The runtime buffers at most 64 discrete feedback outcomes. This buffer describes
-actions already dispatched; dropping old feedback cannot repeat an action.
+completed dispatch attempts, including failures; dropping old feedback cannot repeat an action.
 Continuous moves and drags are represented by the latest state rather than a
-per-frame UI event queue. Diagnostic counters report processed/dropped frames,
-feedback overflow, step duration and frame age.
+per-frame UI event queue. `ControlRuntime.metrics` and `RuntimeView.metrics` expose processed/dropped
+frames, feedback overflow, step duration and frame age for programmatic diagnostics.
+The settings diagnostics page reads persisted action telemetry; it does not yet
+display these runtime counters or latency percentiles.
 
 MediaPipe VIDEO inference remains synchronous within its dedicated worker. A
 second asynchronous callback layer would not itself improve decision quality;
@@ -30,6 +33,38 @@ the bounded mailbox already separates capture from control. Qt's GUI objects
 remain on the main thread. See the official [Qt threading
 contract](https://doc.qt.io/qt-6/threads-qobject.html) and [MediaPipe running-mode
 contract](https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker/python).
+
+The capture callback applies the runtime's power mode to the worker: normal is
+unthrottled, low is 15 fps after 30 no-hand processed frames, sleep is 5 fps after
+150, and deep sleep is 2 fps after 300 only with a usable IR sample reporting
+absence. IR discovery, startup, reads and release stay on an independent daemon; RGB
+capture and the control owner consume only its cached boolean. Samples expire
+after one second. Discovery skips the selected RGB camera. A stalled IR owner
+is retained until it exits, preventing repeated starts from accumulating threads.
+Presence or an unavailable IR sample returns deep sleep to sleep; a tracked hand
+restores normal. These frame thresholds are not fixed elapsed-time deadlines.
+
+## Module boundaries
+
+Five packages, one direction. A package imports only what sits to its left here,
+so a decision can be tested without a camera and a camera can be replaced without
+touching a decision.
+
+| Package | Owns | Imports from this project |
+|---|---|---|
+| `utils/` | config, smoothing, hotkey validation, gesture templates | nothing |
+| `capture/` | camera frames, MediaPipe inference, the Qt worker | nothing |
+| `platform_services/` | the only boundary to the operating system: input, permissions, UI context | `utils/` |
+| `core/` | deterministic decisions and the pointer pipeline | `utils/`, `platform_services/` |
+| `gui/` | windows, settings surfaces, presentation | all of the above |
+
+Two rules carry the design and are enforced in review, not by the type checker:
+
+- `core/` holds no Qt import. Frames and landmarks reach it as plain data
+  through the mailbox, which is what lets the whole decision pipeline run
+  headless in tests.
+- `utils/` never imports `core/`. Shared contracts that both sides need live in
+  `utils/`, so the arrow only ever points one way.
 
 ## Intent is a temporal decision
 
@@ -40,6 +75,20 @@ from sustained pinch movement; click coordinates stay locked while the separate
 motion coordinate drives dragging. Confirmed opening releases; missing or
 ambiguous evidence cancels. Relative mode reacquires the actual native cursor
 position after loss or reactivation.
+
+### One implausible sample never moves the pointer
+
+The visible pointer follows a fingertip, so the pinch lane's palm-coherence
+check cannot protect it: a relabelled hand keeps a plausible palm and only its
+position is wrong. `core/pointer_gate.py` judges the trajectory instead. It
+projects the accepted samples forward at constant velocity and refuses a sample
+that lands further than 35% of the frame diagonal away from that projection.
+Fast deliberate motion is predicted by the same projection and still passes; a
+spurious detection does not. A refused sample holds the pointer for that one
+frame, and a genuinely new place is adopted as soon as a second sample agrees
+with it, so a real reacquisition costs a frame instead of a frozen cursor. The
+gate is per-session state, reset with the rest of the pointer lane, and can be
+disabled with `pointer_stability.enabled = false`.
 
 ### Joint pinch admission and aim
 
@@ -57,8 +106,13 @@ Qualified release can arm a consecutive episode without an extra idle frame.
 The open index tip is expressed in a wrist/middle-MCP palm coordinate frame.
 Transporting it with the current palm preserves whole-hand translation, rotation
 and scale while excluding index articulation. A bounded numeric history restores
-an independent tracker, mapper and cursor filter at the trusted open reference,
-then replays the clean closing trajectory. Candidate replay never overwrites the
+an independent tracker, mapper and cursor filter at the trusted open reference
+(or a preceding snapshot within 200 ms if that mapping sample was dropped),
+then replays the clean closing trajectory including any missing reference sample.
+A failed visible mapping does not interrupt an independently valid clean branch.
+If both branches lose mapping during a drag, the engine releases the button
+immediately even when camera frames remain fresh.
+Candidate replay never overwrites the
 visible pointer branch: its output still matches the ordinary fingertip path.
 Only after confirmation does the clean branch replace the live filter state,
 using copies so the two branches cannot alias. This also prevents a second
@@ -76,7 +130,12 @@ stops drag movement while debounced release posts mouse-up once.
 
 Current policies use a 200 ms observation window, at least two genuine open
 samples spanning 40 ms, at least two confident closed samples spanning 55 ms,
-and a 250 ms candidate timeout. Filter snapshots span at most 250 ms/64 frames;
+and a 250 ms candidate inactivity timeout. A meaningful gap reduction of at
+least 0.03 palm units renews the approach budget, with a 1.5 s total candidate
+limit. Once physical closure begins, its confidence must qualify within 250 ms;
+approach progress never shortens the physical hold used for click/drag timing.
+The 200 ms window also bounds consecutive observation gaps; longer gaps cancel
+the episode. Filter snapshots span at most 250 ms/64 frames;
 the motion trace is bounded to 64 frames with a separately retained drag anchor.
 Missing reconstruction history, inconsistent palm geometry, discontinuous
 timestamps and camera frame-size changes cancel the episode. A frame-size
@@ -108,8 +167,9 @@ latency-critical input loop.
 
 ## Failure and shutdown
 
-1. Duplicate, regressing, stale, future or malformed observations release input
-   and reset incomplete intent before further dispatch.
+1. Duplicate, regressing, stale, excessively future or malformed observations release input
+   and reset incomplete intent before further dispatch. Future clock skew up to
+   50 ms is tolerated; older evidence expires after 250 ms.
 2. A stalled camera expires the lease without requiring another frame or GUI
    callback. A resumed stream starts a fresh interaction.
 3. Stop first revokes the session without waiting for the native dispatch lock.

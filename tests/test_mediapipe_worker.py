@@ -1,6 +1,6 @@
 import threading
 
-from core.mediapipe_worker import MediaPipeVideoWorker
+from capture.mediapipe_worker import MediaPipeVideoWorker
 
 
 class Capture:

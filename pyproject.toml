@@ -41,7 +41,7 @@ gesture-control = "main:main"
 py-modules = ["main"]
 
 [tool.setuptools.packages.find]
-include = ["core*", "gui*", "utils*", "platform_services*"]
+include = ["core*", "capture*", "gui*", "utils*", "platform_services*"]
 exclude = ["tests*", "data*", "models*", "assets*"]
 
 [tool.setuptools.package-data]
@@ -51,3 +51,34 @@ gui = ["resources/*.png"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+# Start with the rules that catch real defects: pyflakes (F), pycodestyle
+# errors (E), import order (I), obsolete syntax (UP) and bugbear (B).
+select = ["E", "F", "I", "UP", "B"]
+# Debt measured before this gate existed: 434 lines are over the limit, almost
+# all of them translated UI strings and comments a formatter cannot wrap. Drop
+# E501 from this list once those files are reflowed by hand.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests hold the Qt application in a local so it outlives the widgets; no test
+# reads that variable again.
+"tests/**" = ["F841"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "gui", "platform_services", "utils", "tests"]
+
+[tool.mypy]
+python_version = "3.13"
+# Typing starts at the boundary the control runtime depends on. gui/,
+# platform_services/ and utils/ join once core/ is clean.
+files = ["core"]
+# PySide6, MediaPipe and OpenCV ship incomplete stubs, so a missing third-party
+# type is not an error in this first pass.
+ignore_missing_imports = true
+warn_unused_configs = true

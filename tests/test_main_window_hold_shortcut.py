@@ -104,7 +104,6 @@ def test_main_window_passes_monitor_held_state_to_control_session_per_frame(tmp_
         captured = {}
         window.is_running = True
         window.control_session.update = lambda **kwargs: captured.update(kwargs)
-        window._update_power_mode = lambda landmarks, **_kwargs: None
         window.tracker.update = lambda landmarks, shape, **_kwargs: (None, False)
         window._check_edge_lost = lambda landmarks, now: None
         window.classifier.classify = lambda landmarks, **_kwargs: "none"
@@ -136,7 +135,6 @@ def test_session_exit_frame_releases_drag_even_without_a_pointer_position(monkey
             window.control_session, "state", main_window.SessionState.INACTIVE
         )
         window.action_coordinator.stop = lambda: released.append(True)
-        window._update_power_mode = lambda _landmarks, **_kwargs: None
         window.tracker.update = lambda _landmarks, _shape, **_kwargs: (None, False)
         window._check_edge_lost = lambda _landmarks, _now: None
         window.classifier.classify = lambda _landmarks, **_kwargs: "fist"

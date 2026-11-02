@@ -545,7 +545,7 @@ QPushButton#saveBtn {
     color: #FFFFFF;
 }
 QPushButton#saveBtn:hover {
-    background: #729BFF;
+    background: #3F6AE0;
 }
 QPushButton#addComboBtn {
     background: rgba(94, 140, 255, 0.14);

@@ -109,3 +109,162 @@ def test_slow_context_lookup_cannot_post_after_the_input_lease_expires():
     assert not result.executed
     assert result.error_code == "stale_frame"
     assert native.events == []
+
+
+def test_repeated_suspend_during_watchdog_exit_does_not_strand_a_release():
+    exiting = threading.Event()
+    finish_exit = threading.Event()
+
+    class RetiringGuard(InputGuard):
+        def _watch(self):
+            super()._watch()
+            # The watchdog has committed to exiting, but is_alive() is still
+            # true: exactly the interleaving in stop/finalizer/close retries.
+            exiting.set()
+            assert finish_exit.wait(2)
+
+    controller = MacOSInputController(Native())
+    guard = RetiringGuard(lambda: controller)
+    guard.start()
+    try:
+        guard.close()
+        assert exiting.wait(1)
+        assert guard._thread.is_alive()
+        assert not guard.release_pending
+        assert guard.suspend().executed
+        guard.close()
+        assert not guard.release_pending
+    finally:
+        finish_exit.set()
+        guard._thread.join(timeout=1)
+    assert not guard._thread.is_alive()
+    assert guard.suspend().executed
+    assert not guard.release_pending
+
+
+def test_pending_release_prevents_start_until_mouse_up_succeeds():
+    _, native, _, guard = setup_guard()
+    assert guard.execute(ActionRequest("drag_start", x=100, y=100)).executed
+    native.fail_up = True
+    assert not guard.suspend().executed
+    with pytest.raises(RuntimeError, match="pending release"):
+        guard.start(threaded=False)
+    assert guard.execute(ActionRequest("left_click", x=100, y=100)).error_code == "session_stopped"
+    native.fail_up = False
+    assert guard.release().executed
+    guard.start(threaded=False)
+    guard.observe_frame(10.0)
+    assert guard.execute(ActionRequest("left_click", x=100, y=100)).executed
+    guard.close()
+
+
+def test_closed_guard_is_terminal_even_after_successful_release():
+    _, _, _, guard = setup_guard()
+    guard.close()
+    assert not guard.release_pending
+    with pytest.raises(RuntimeError, match="closed guard"):
+        guard.start(threaded=False)
+
+
+def test_close_publishes_terminal_state_before_native_release_can_reenter_start():
+    rearmed = []
+
+    class ReentrantController:
+        def release_drag(self):
+            try:
+                guard.start(threaded=False)
+            except RuntimeError:
+                rearmed.append(False)
+            else:
+                rearmed.append(True)
+            return ActionResult(True)
+
+    guard = InputGuard(ReentrantController)
+    guard.start(threaded=False)
+    guard.close()
+    assert rearmed == [False]
+    assert guard.execute(ActionRequest("left_click")).error_code == "session_stopped"
+
+
+def test_close_without_an_existing_watchdog_retries_a_failed_release():
+    _, native, _, guard = setup_guard()
+    guard.execute(ActionRequest("drag_start", x=100, y=100))
+    native.fail_up = True
+    guard.close()
+    assert guard.release_pending
+    native.fail_up = False
+    assert native.released.wait(1), "close must give the owed release a retry owner"
+    guard._thread.join(timeout=1)
+    assert not guard.release_pending
+    assert not guard._thread.is_alive()
+
+
+def test_suspend_without_watchdog_releases_after_native_lock_becomes_available():
+    _, native, _, guard = setup_guard()
+    guard.execute(ActionRequest("drag_start", x=100, y=100))
+    locked = threading.Event()
+    unlock = threading.Event()
+
+    def hold_native_lock():
+        with guard._lock:
+            locked.set()
+            assert unlock.wait(2)
+
+    owner = threading.Thread(target=hold_native_lock)
+    owner.start()
+    try:
+        assert locked.wait(1)
+        assert not guard.suspend(timeout=0).executed
+        assert guard.release_pending
+    finally:
+        unlock.set()
+        owner.join(timeout=1)
+    try:
+        assert native.released.wait(1)
+        assert not guard.release_pending
+    finally:
+        guard.close()
+
+
+def test_failed_release_after_watchdog_retirement_gets_a_new_retry_owner():
+    retired = threading.Event()
+    finish_exit = threading.Event()
+
+    class RetiringGuard(InputGuard):
+        def _watch(self):
+            super()._watch()
+            retired.set()
+            assert finish_exit.wait(2)
+
+    fail_release = [False]
+    released = threading.Event()
+
+    def release_drag():
+        if fail_release[0]:
+            return ActionResult(False, "Temporary release failure", "release_pending")
+        released.set()
+        return ActionResult(True)
+
+    controller = SimpleNamespace(release_drag=release_drag)
+    guard = RetiringGuard(lambda: controller)
+    guard.start()
+    old_thread = guard._thread
+    try:
+        guard.close()
+        assert retired.wait(1)
+        assert old_thread.is_alive()
+        # A finalizer can still owe a release while the old worker is alive
+        # but has retired. Failed mouse-up must not be delegated to that worker.
+        released.clear()
+        fail_release[0] = True
+        assert not guard.release().executed
+        assert guard._thread is not old_thread
+        fail_release[0] = False
+        assert released.wait(1)
+    finally:
+        finish_exit.set()
+        old_thread.join(timeout=1)
+        guard.close()
+        guard._thread.join(timeout=1)
+    assert not guard.release_pending
+    assert not guard._thread.is_alive()

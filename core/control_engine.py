@@ -7,13 +7,13 @@ Native input is exclusively owned by the coordinator and its watchdog.
 """
 from __future__ import annotations
 
+import os
+import time
 from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass
 from math import isfinite
 from numbers import Real
-import os
-import time
 
 from core.action_state_machine import ActionState, ActionStateMachine, PinchActionEvidence
 from core.assist.features import build_features
@@ -22,22 +22,29 @@ from core.assist.target_model import Target, TargetModel
 from core.combo_detector import ComboDetector
 from core.contextual_intent import ContextualIntentController
 from core.control_session import ActivationMode, ControlSession, SessionState
-from core.dynamic_gesture_template import DynamicGestureMatcher, DynamicGestureTemplate
 from core.dynamic_intent_lifecycle import DynamicIntentLifecycle, DynamicIntentState
 from core.gesture_classifier import GestureClassifier
 from core.hand_dynamics import HandDynamics
 from core.input_guard import frame_is_fresh
 from core.intent_arbiter import IntentArbiter, IntentDecision, IntentOwner
-from core.pinch_intent import PinchEvidence, PinchIntentObserver
 from core.performance import preset_for
+from core.pinch_intent import PinchEvidence, PinchIntentObserver
+from core.pointer_gate import PointerJumpGate
 from core.pointer_mapping import AbsoluteMapper, RelativeMapper, ScreenBounds
+from core.pointer_projection import project
 from core.scroll_intent import ScrollIntentController
 from core.static_gesture_template import StaticGestureMatcher, StaticGestureTemplate
 from core.transition_episodes import PinchEpisodeTracker
 from core.transition_model import TransitionModel
 from platform_services.contracts import ActionRequest, ActionResult
+from utils.dynamic_gesture_template import DynamicGestureMatcher, DynamicGestureTemplate
+from utils.settings import effective_assist
+from utils.settings import read as read_settings
 from utils.smoothing import (
-    CURSOR_SMOOTHING_BETA, DEFAULT_DEAD_ZONE, CursorSmoother, mincutoff_for_smoothing,
+    CURSOR_SMOOTHING_BETA,
+    DEFAULT_DEAD_ZONE,
+    CursorSmoother,
+    mincutoff_for_smoothing,
 )
 from utils.tracker import TargetTracker
 
@@ -132,6 +139,13 @@ class ControlEngine:
         self.combo_detector = ComboDetector(clock=clock)
         self.combo_detector.set_combos(self.config.get("gesture_combos") or [])
         self.pinch_episodes = PinchEpisodeTracker(clock=clock)
+        stability = self.config.get("pointer_stability") or {}
+        # The pointer lane maps a fingertip straight onto the screen, so it needs
+        # its own plausibility check; the pinch lane's palm-coherence gate cannot
+        # help a position that follows the fingertip across the frame.
+        self.jump_gate = PointerJumpGate(
+            enabled=stability.get("enabled", True) is True,
+        )
         self.transition_model = None
         self._last_frame_time = float("-inf")
         self._last_frame_size = None
@@ -185,22 +199,26 @@ class ControlEngine:
                              ("drag_threshold", 0.3)):
             setattr(self.action_machine, key, action.get(key, default))
         self.action_machine.set_zone_rules(self.config.get("zone_rules") or [])
-        mapping = self.config.get("pointer_mapping") or {}
+        mapping = read_settings(self.config).mapping
         try:
-            self.pointer_mapper = (RelativeMapper(mapping.get("gain", 2.0))
-                                   if mapping.get("mode") == "relative" else AbsoluteMapper())
+            self.pointer_mapper = (RelativeMapper(mapping.gain)
+                                   if mapping.mode == "relative" else AbsoluteMapper())
         except (TypeError, ValueError):
             self.pointer_mapper = AbsoluteMapper()
         self._refresh_pointer_assist()
         self._refresh_transition_model()
 
     def _map_pointer(self, pos, frame_size):
-        if self._pointer_anchor_pending and isinstance(self.pointer_mapper, RelativeMapper):
-            self.pointer_mapper.begin(pos, frame_size, self.screen_bounds,
-                                      cursor=self.cursor_position())
-            self.smoother.reset()
+        pending = self._pointer_anchor_pending
         self._pointer_anchor_pending = False
-        return self.pointer_mapper.map(pos, frame_size, self.screen_bounds)
+        if pending and isinstance(self.pointer_mapper, RelativeMapper):
+            # A re-anchor starts a new filter history; carrying the old one into
+            # the new anchor would smooth across the pause.
+            self.smoother.reset()
+        return project(
+            self.pointer_mapper, self.screen_bounds, pos, frame_size,
+            anchor_pending=pending, cursor_position=self.cursor_position,
+        )
 
     def reset(self):
         """Release native input and discard candidates at a control boundary."""
@@ -214,6 +232,7 @@ class ControlEngine:
         self.classifier.reset_stabilization()
         self.hand_dynamics.reset()
         self.pointer_mapper.reset()
+        self.jump_gate.reset()
         self.pinch_episodes.reset()
         self._hand_present_last_frame = False
         self._locked_position = None
@@ -348,8 +367,14 @@ class ControlEngine:
             self._joint_motion_history.clear()
         if pos is not None and detected:
             dynamic = self.config.get("dynamic_gestures") or {}
-            anchor = self._map_pointer(pos, size) or (0, 0)
-            if ((decision.allow_combo or decision.allow_dynamic)
+            anchor = self._map_pointer(pos, size)
+            if anchor is None:
+                # No usable mapping this frame: there is no position to bind a
+                # context probe or a completed take to. Reuse the last dispatched
+                # point instead of inventing the screen origin.
+                anchor = self._last_cursor_pos
+            if (anchor is not None
+                    and (decision.allow_combo or decision.allow_dynamic)
                     and (self.config.get("context_aware") or {}).get("enabled", True)):
                 # A one-shot combo or completed take must not be the first
                 # asynchronous policy request. Warm the bounded context port
@@ -362,6 +387,7 @@ class ControlEngine:
             observed, matched = self.observe_completed_dynamic_shortcut(
                 landmarks, anchor, gesture=gesture, hand_present=hand_present, now=now,
                 allowed=bool(decision.allow_dynamic and dynamic.get("enabled", False)
+                             and anchor is not None
                              and self.dynamic_runtime_matcher is not None),
             )
             if not (matched or observed.recording or observed.completed_frames is not None
@@ -521,42 +547,7 @@ class ControlEngine:
             latency_ms=latency_ms,
         )
 
-    @staticmethod
-    def _effective_assist_values(assist) -> tuple[float, float]:
-        """Configured assist values, overridden by a learned step when present.
-
-        Reading through this one function keeps the model, the diagnostics page
-        and the tuner's own next input from disagreeing about what is in force.
-        """
-        learned = assist.get("learned")
-        learned = learned if isinstance(learned, dict) else {}
-        # A learned step is anchored to the values it started from. When the
-        # user edits the configured numbers, their choice wins and the stale
-        # adaptation is ignored instead of quietly overriding it.
-        if learned and (
-            learned.get("base_max_snap_distance") != assist.get("max_snap_distance")
-            or learned.get("base_min_confidence") != assist.get("min_confidence")
-        ):
-            learned = {}
-
-        def pick(key, default):
-            for source in (learned, assist):
-                raw = source.get(key)
-                if raw is None or isinstance(raw, bool):
-                    continue
-                try:
-                    number = float(raw)
-                except (TypeError, ValueError):
-                    continue
-                if number != number or number in (float("inf"), float("-inf")):
-                    continue
-                return number
-            return default
-
-        return pick("max_snap_distance", 24.0), pick("min_confidence", 0.55)
-
-    @staticmethod
-    def _restore_static_templates(template_dicts):
+    def _restore_static_templates(self, template_dicts):
         """Convert valid persisted custom-trigger dictionaries into runtime templates."""
         if not isinstance(template_dicts, list):
             return {}
@@ -737,7 +728,7 @@ class ControlEngine:
         the deterministic pointer lane keeps full authority over every frame.
         """
         assist = self.config.get("pointer_assist") or {}
-        distance, confidence = self._effective_assist_values(assist)
+        distance, confidence = effective_assist(assist)
         try:
             model = TargetModel(
                 max_snap_distance=distance,
@@ -879,7 +870,7 @@ class ControlEngine:
         raw_hits = [t for t in targets if _point_inside(x, y, t.bounds)]
         chosen_raw = raw_hits[0].target_id if len(raw_hits) == 1 else ""
         payload = []
-        for target, row in zip(targets, rows):
+        for target, row in zip(targets, rows, strict=False):
             bx, by, bw, bh = target.bounds
             centre_x, centre_y = bx + bw / 2.0, by + bh / 2.0
             payload.append({
@@ -963,8 +954,12 @@ class ControlEngine:
         visible pointer's tracker, mapper or filter. The branch removes curl
         from the target and drag channel without replaying native events.
         """
+        # A dropped mapping sample may omit the exact open reference. Replay
+        # it from an earlier causal snapshot instead of guessing a new target.
         reference = next((item for item in reversed(self._pointer_history)
-                          if item[0] == evidence.reference_at), None)
+                          if evidence.reference_at is not None
+                          and 0 <= evidence.reference_at - item[0]
+                          <= self.pinch_intent.HISTORY_SECONDS), None)
         if reference is None:
             self._joint_mapping_failed = True
             return None
@@ -998,7 +993,7 @@ class ControlEngine:
         """Advance only the hidden palm-transported motion branch."""
         if self._joint_mapping_failed:
             return None
-        if evidence.new_episode:
+        if evidence.new_episode or self._joint_pointer_state is None:
             return self._reconstruct_pinch_pointer(evidence, frame_shape)
         if self._joint_pointer_state is None or evidence.motion_position is None:
             self._joint_mapping_failed = True
@@ -1057,6 +1052,11 @@ class ControlEngine:
             self.last_executed_gesture = self.last_executed_action = "none"
         h, w = frame_shape[:2]
         self._last_frame_size = (w, h)
+        if not self.jump_gate.accept(pos, (w, h), now):
+            # One implausible sample is not evidence that the hand moved. Holding
+            # this frame keeps a false detection from teleporting the pointer; a
+            # genuinely new place is adopted on the next agreeing sample.
+            return tuple(self._outcomes[initial:])
         raw = getattr(self.classifier, "last_raw_gesture", gesture)
         joint_owns = joint_evidence is not None and joint_evidence.owns_pointer
         scroll_pose = not joint_owns and (
@@ -1070,16 +1070,33 @@ class ControlEngine:
         # Candidate admission may reconstruct a target, but cannot install that
         # older filter state into this branch or lock the native cursor.
         mapped = self._map_pointer(pos, (w, h))
-        if mapped is None:
-            return ()
-        x, y = self.smoother.smooth(*mapped, timestamp=now)
-        x, y = self.screen_bounds.clamp_float(x, y)
-        self._current_motion_pos = (x, y)
-        joint_motion = (x, y)
+        joint_motion = None
         if joint_owns and joint_evidence.phase in {"candidate", "confirmed", "released"}:
             joint_motion = self._advance_pinch_pointer(joint_evidence, frame_shape, now)
         elif joint_evidence is not None and joint_evidence.phase == "cancelled":
             self._joint_pointer_state = None
+        if mapped is None:
+            if joint_motion is None:
+                # Fresh landmarks still renew the input lease. If neither
+                # mapping can produce motion, the watchdog cannot infer this
+                # loss from frame age; end a native drag at this boundary.
+                if self.action_machine.state is ActionState.DRAGGING:
+                    self._outcomes.append(DispatchOutcome(
+                        ActionRequest("drag_end", core_pointer=True),
+                        self.action_coordinator.stop(),
+                    ))
+                self.action_machine.reset()
+                return tuple(self._outcomes[initial:])
+            # The clean branch has its own valid mapping and physical clock.
+            # Keep candidate motion at the last visible position for this one
+            # frame; confirmed/released input uses the clean branch below.
+            x, y = self._last_cursor_pos or joint_motion
+        else:
+            x, y = self.smoother.smooth(*mapped, timestamp=now)
+            x, y = self.screen_bounds.clamp_float(x, y)
+            self._current_motion_pos = (x, y)
+        if not joint_owns:
+            joint_motion = (x, y)
         action_evidence = self._pinch_action_evidence(joint_evidence, now, joint_motion)
         if (joint_evidence is not None and joint_evidence.phase in {"confirmed", "released"}
                 and not self._joint_mapping_failed and self._joint_pointer_state is not None):

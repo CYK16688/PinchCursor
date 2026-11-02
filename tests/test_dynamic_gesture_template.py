@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from core.dynamic_gesture_template import (
+from utils.dynamic_gesture_template import (
     ALLOWED_DYNAMIC_ACTIONS,
     DynamicGestureMatcher,
     DynamicGestureTemplate,

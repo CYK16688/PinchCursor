@@ -6,31 +6,16 @@ landed away from where the pinch began. Measured before the fix: 2 px of drift a
 40 px/s of hand movement, 7 px at 100 px/s, 20 px at 300 px/s, 40 px at 600 px/s.
 """
 
-import os
-
 import pytest
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
-from PySide6.QtWidgets import QApplication
-
-
-@pytest.fixture(scope="module")
-def app():
-    return QApplication.instance() or QApplication([])
+from core.control_engine import ControlEngine
 
 
 @pytest.fixture
-def window(app, tmp_path, monkeypatch):
-    from gui import main_window as mw
-    from utils.config_manager import ConfigManager
-
-    config = ConfigManager(config_path=tmp_path / "settings.json")
-    monkeypatch.setattr(mw, "ConfigManager", lambda: config)
-    widget = mw.MainWindow()
-    yield widget
-    widget.close()
-    app.processEvents()
+def window():
+    host = ControlEngine.__new__(ControlEngine)
+    host._pinch_freeze_pos = None
+    return host
 
 
 def _info(is_pinching):

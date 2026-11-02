@@ -1,11 +1,11 @@
 """Window wiring for telemetry: opt-in, and it never touches control flow."""
 
 import pathlib
-import tempfile
 
 import pytest
 from PySide6.QtWidgets import QApplication
 
+from core.control_engine import ControlEngine
 from core.telemetry import TelemetryStore
 from gui.main_window import MainWindow
 from platform_services.contracts import UIContext
@@ -18,10 +18,10 @@ def app():
 
 
 def test_actions_are_recorded_with_context_and_outcome(tmp_path):
-    window = MainWindow.__new__(MainWindow)
+    window = ControlEngine.__new__(ControlEngine)
     window.telemetry = TelemetryStore(tmp_path / "t.sqlite3", enabled=True)
 
-    MainWindow._record_telemetry_action(
+    ControlEngine._record_telemetry_action(
         window,
         action="left_click",
         executed=True,
@@ -41,10 +41,10 @@ def test_actions_are_recorded_with_context_and_outcome(tmp_path):
 
 
 def test_a_missing_context_is_recorded_as_empty_not_dropped(tmp_path):
-    window = MainWindow.__new__(MainWindow)
+    window = ControlEngine.__new__(ControlEngine)
     window.telemetry = TelemetryStore(tmp_path / "t.sqlite3", enabled=True)
 
-    MainWindow._record_telemetry_action(
+    ControlEngine._record_telemetry_action(
         window,
         action="scroll_down",
         executed=False,
@@ -61,10 +61,10 @@ def test_a_missing_context_is_recorded_as_empty_not_dropped(tmp_path):
 
 
 def test_recording_is_inert_when_telemetry_is_off(tmp_path):
-    window = MainWindow.__new__(MainWindow)
+    window = ControlEngine.__new__(ControlEngine)
     window.telemetry = TelemetryStore(tmp_path / "t.sqlite3", enabled=False)
 
-    MainWindow._record_telemetry_action(
+    ControlEngine._record_telemetry_action(
         window, action="left_click", executed=True, gesture="pinch", context=None,
         x=1, y=2, latency_ms=1.0,
     )

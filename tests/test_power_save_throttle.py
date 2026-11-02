@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
-from core.mediapipe_worker import MediaPipeVideoWorker
+from capture.mediapipe_worker import MediaPipeVideoWorker
 
 
 def test_the_worker_starts_unthrottled():
@@ -49,15 +49,11 @@ def test_each_power_mode_has_a_distinct_frame_interval():
     application = QApplication.instance() or QApplication([])
     from gui import main_window
 
-    window = main_window.MainWindow.__new__(main_window.MainWindow)
-    intervals = {
-        "normal": 0.0,
-        "low": 1.0 / 15.0,
-        "sleep": 1.0 / 5.0,
-        "deep_sleep": 1.0 / 2.0,
-    }
-    # The invariant: only "normal" is unthrottled, and deeper modes are slower.
-    assert intervals["normal"] == 0.0
-    assert intervals["low"] < intervals["sleep"] < intervals["deep_sleep"]
-    assert application is not None
-    assert window is not None
+    window = main_window.MainWindow()
+    try:
+        intervals = window._POWER_FRAME_INTERVALS
+        # Read the production table: a copied literal cannot detect regressions.
+        assert intervals["normal"] == 0.0
+        assert 0 < intervals["low"] < intervals["sleep"] < intervals["deep_sleep"] <= 1
+    finally:
+        window.close()

@@ -1,12 +1,13 @@
 """Bounded actor for continuous input; no Qt event delivery is required."""
 from __future__ import annotations
 
-from collections import deque
-from dataclasses import dataclass, replace
 import threading
 import time
+from collections import deque
+from dataclasses import dataclass, replace
 
 from core.control_engine import ControlSnapshot, DispatchOutcome, HandObservation
+from core.power_policy import mode_for
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,7 @@ class ControlRuntime:
         self._metrics = RuntimeMetrics()
         self._no_hand_frames = 0
         self._power_mode = "normal"
+        self._ir_presence = None
 
     @property
     def is_running(self):
@@ -67,6 +69,15 @@ class ControlRuntime:
     def metrics(self):
         with self._condition:
             return self._metrics
+
+    def set_ir_presence(self, present):
+        """Receive a sampled IR result without doing camera I/O on this actor.
+
+        Only an explicit absence sample permits deep sleep. ``None`` means no
+        usable detector (including a failed read), so RGB stays responsive.
+        """
+        with self._condition:
+            self._ir_presence = present if isinstance(present, bool) else None
 
     def start(self):
         with self._condition:
@@ -137,8 +148,7 @@ class ControlRuntime:
                 elapsed = max(0.0, (self._clock() - started) * 1000.0)
                 with self._condition:
                     self._no_hand_frames = 0 if snapshot.hand_present else self._no_hand_frames + 1
-                    self._power_mode = ("sleep" if self._no_hand_frames > 150 else
-                                        "low" if self._no_hand_frames > 30 else "normal")
+                    self._power_mode = mode_for(self._no_hand_frames, self._ir_presence)
                     self._metrics = replace(
                         self._metrics, processed=self._metrics.processed + 1,
                         last_step_ms=elapsed, max_step_ms=max(self._metrics.max_step_ms, elapsed),

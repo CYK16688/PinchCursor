@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import math
-import time
 import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import cv2
 from PySide6.QtCore import QThread, Signal
@@ -78,7 +78,7 @@ class MediaPipeVideoWorker(QThread):
         self.min_frame_interval = max(0.0, min(value, 1.0))
 
     @classmethod
-    def for_test(cls) -> "MediaPipeVideoWorker":
+    def for_test(cls) -> MediaPipeVideoWorker:
         return cls(detector=None, capture_factory=lambda _: None)
 
     def next_timestamp_ms(self, now: float | None = None) -> int:

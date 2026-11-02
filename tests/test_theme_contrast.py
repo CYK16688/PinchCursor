@@ -7,8 +7,8 @@ These tests compute the real ratios from the tokens, so a new colour cannot
 quietly reintroduce the problem.
 """
 
-import re
 import pathlib
+import re
 
 import pytest
 
@@ -56,9 +56,10 @@ def test_the_primary_button_ink_is_legible(selector):
     assert contrast(_colour(block, "color"), _colour(block, "background")) >= AA_NORMAL
 
 
-def test_the_primary_button_hover_is_not_worse_than_its_rest_state():
-    rest = _block("QPushButton#primaryControlButton")
-    hover = _block("QPushButton#primaryControlButton:hover")
+@pytest.mark.parametrize("selector", ["QPushButton#primaryControlButton", "QPushButton#saveBtn"])
+def test_button_hover_ink_is_legible(selector):
+    rest = _block(selector)
+    hover = _block(selector + ":hover")
     ink = _colour(rest, "color")
     assert contrast(ink, _colour(hover, "background")) >= AA_NORMAL
 

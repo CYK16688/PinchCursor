@@ -1,6 +1,7 @@
 """Control-thread ownership, bounded latency and stopped-session rejection."""
 import threading
 import time
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -12,7 +13,12 @@ from core.control_runtime import ControlRuntime
 from core.control_session import SessionState
 from core.input_guard import InputGuard
 from core.pointer_mapping import ScreenBounds
-from platform_services.contracts import ActionRequest, ActionResult, PlatformCapabilities, PlatformServices
+from platform_services.contracts import (
+    ActionRequest,
+    ActionResult,
+    PlatformCapabilities,
+    PlatformServices,
+)
 from platform_services.null import GenericUIContextProvider, UnavailablePermissionProvider
 from utils.config_manager import ConfigManager
 
@@ -65,6 +71,61 @@ class BlockingEngine:
     def reset(self):
         self.action_coordinator.input_guard.release()
         return ()
+
+
+@pytest.mark.parametrize("ir_presence", [None, True, False])
+def test_runtime_power_modes_require_ir_absence_for_deep_sleep_and_wake(ir_presence):
+    engine = BlockingEngine(Controller())
+    hand_present = [False]
+    engine.step = lambda observation: replace(
+        engine._snapshot(observation.timestamp), hand_present=hand_present[0],
+    )
+    runtime = ControlRuntime(engine)
+    runtime.set_ir_presence(ir_presence)
+    runtime.start()
+    submitted = 0
+
+    def send(count):
+        nonlocal submitted
+        for _ in range(count):
+            submitted += 1
+            assert runtime.submit(HandObservation(time.monotonic(), None, (640, 480)))
+            until(lambda submitted=submitted: runtime.metrics.processed == submitted)
+
+    try:
+        send(30)
+        assert runtime.power_mode == "normal"
+        send(1)
+        assert runtime.power_mode == "low"
+        send(119)
+        assert runtime.power_mode == "low"
+        send(1)
+        assert runtime.power_mode == "sleep"
+        send(149)
+        assert runtime.power_mode == "sleep"
+        send(1)
+        assert runtime.power_mode == ("deep_sleep" if ir_presence is False else "sleep")
+
+        # Presence or loss of the optional IR device must restore the faster
+        # RGB wake-up cadence without needing a hand to be recognized first.
+        runtime.set_ir_presence(True)
+        send(1)
+        assert runtime.power_mode == "sleep"
+        runtime.set_ir_presence(False)
+        send(1)
+        assert runtime.power_mode == "deep_sleep"
+        runtime.set_ir_presence(None)
+        send(1)
+        assert runtime.power_mode == "sleep"
+        runtime.set_ir_presence(False)
+        hand_present[0] = True
+        send(1)
+        assert runtime.power_mode == "normal"
+        hand_present[0] = False
+        send(1)
+        assert runtime.power_mode == "normal"
+    finally:
+        assert runtime.stop()
 
 
 def test_mailbox_replaces_pending_frames_and_bounds_feedback():
@@ -214,7 +275,8 @@ def test_real_control_engine_runs_all_input_without_pumping_qt(tmp_path, blocked
     from tests.test_continuous_pointer_pipeline import landmarks_for
 
     now = [10.0]
-    clock = lambda: now[0]
+    def clock():
+        return now[0]
     config = ConfigManager(config_path=tmp_path / "config.json").config
     config["control_session"]["mode"] = "always"
     config["pointer_assist"]["enabled"] = blocked_auxiliary
@@ -266,7 +328,7 @@ def test_real_control_engine_runs_all_input_without_pumping_qt(tmp_path, blocked
             now[0] += 1 / 30
             runtime.submit(HandObservation(now[0], landmarks_for(pose, travel * index / max(1, count - 1)), (640, 480)))
             submitted += 1
-            until(lambda: runtime.metrics.processed == submitted)
+            until(lambda submitted=submitted: runtime.metrics.processed == submitted)
 
     try:
         send("point", 20)

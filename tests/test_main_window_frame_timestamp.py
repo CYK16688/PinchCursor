@@ -4,9 +4,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
+from capture.mediapipe_worker import LandmarkFrame
 from core.action_state_machine import ActionState
 from core.intent_arbiter import IntentDecision, IntentOwner
-from core.mediapipe_worker import LandmarkFrame
 from gui import main_window
 from platform_services.contracts import ActionResult
 
@@ -54,7 +54,6 @@ def test_process_frame_uses_one_worker_timestamp_across_the_control_lane(monkeyp
         window.is_running = True
         window.control_session.state = window.control_session.state.POINTER
         window.config.set("dynamic_gestures", "enabled", False)
-        window._update_power_mode = lambda _landmarks: None
         window.tracker.update = tracker_update
         window._check_edge_lost = lambda _landmarks, now: observed.setdefault("edge", now)
         window.classifier.classify = classify

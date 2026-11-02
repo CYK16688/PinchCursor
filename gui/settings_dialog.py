@@ -1,32 +1,48 @@
 """设置对话框 - 卡片式手势配置界面（参考Gameface设计）"""
 
 from copy import deepcopy
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QListWidget,
-    QListWidgetItem, QStackedWidget,
-    QWidget, QLabel, QSlider, QComboBox, QGroupBox,
-    QFormLayout, QPushButton, QSpinBox, QScrollArea,
-    QFrame, QCheckBox, QLineEdit, QDoubleSpinBox, QMessageBox
-)
+
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDoubleSpinBox,
+    QFormLayout,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSlider,
+    QSpinBox,
+    QStackedWidget,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
-from . import icons
-
-from .camera_settings_page import CameraSettingsPage
-from .feedback_settings_page import FeedbackSettingsPage
-from .gesture_list import GestureList
-from .dynamic_gesture_settings_page import DynamicGestureSettingsPage
-from .static_gesture_record_dialog import StaticGestureRecordDialog
-from platform_services.factory import create_platform_services
+from capture.mediapipe_worker import MediaPipeVideoWorker
+from gui.controls import SegmentedControl, ToggleSwitch
+from gui.i18n import tr, translate
+from gui.theme import use_styled_background
 from platform_services.camera_selection import open_configured_camera
-from core.mediapipe_worker import MediaPipeVideoWorker
+from platform_services.factory import create_platform_services
 from utils.camera_utils import open_camera
 from utils.locale import DEFAULT_LOCALE, SUPPORTED_LOCALES, normalize_locale
-from gui.i18n import tr, translate
-from gui.controls import SegmentedControl, ToggleSwitch
-from gui.theme import use_styled_background
 
+from . import icons
+from .camera_settings_page import CameraSettingsPage
+from .dynamic_gesture_settings_page import DynamicGestureSettingsPage
+from .feedback_settings_page import FeedbackSettingsPage
+from .gesture_list import GestureList
+from .static_gesture_record_dialog import StaticGestureRecordDialog
 
 
 def styled_form(parent=None):
@@ -529,6 +545,7 @@ class SettingsDialog(QDialog):
         for page, key in zip(
             (self.pointer_page, self.activation_page, self.control_advanced_page),
             self._control_tab_keys,
+            strict=False,
         ):
             self.control_tabs.addTab(page, tr(key))
         layout.addWidget(self.control_tabs, 1)
@@ -1113,7 +1130,6 @@ class SettingsDialog(QDialog):
 
     def create_combo_tab(self):
         """创建组合动作标签页"""
-        from gui.combo_card import ComboCard
 
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -1487,6 +1503,7 @@ class SettingsDialog(QDialog):
     def _create_diagnostics_tab(self):
         """Add the read-only statistics page and refresh it when selected."""
         from core.telemetry import default_path
+
         from .diagnostics_page import DiagnosticsPage
 
         page = DiagnosticsPage(default_path(self.config.config_path))

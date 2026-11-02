@@ -19,7 +19,10 @@ from core.control_engine import ControlEngine, HandObservation
 from core.pinch_intent import PinchEvidence
 from core.pointer_mapping import ScreenBounds
 from platform_services.contracts import (
-    AuthorizationState, PermissionSnapshot, PlatformCapabilities, PlatformServices,
+    AuthorizationState,
+    PermissionSnapshot,
+    PlatformCapabilities,
+    PlatformServices,
 )
 from platform_services.macos.input_controller import MacOSInputController
 from tests.test_control_engine import Clock, Context, Native, pose
@@ -494,3 +497,127 @@ def test_missing_clean_pointer_history_cancels_instead_of_guessing_click_positio
     replay.hold(0.2, 1.0)
     replay.hold(0.3)
     assert len(replay.events("left_down")) == len(replay.events("left_up")) == 1
+
+
+@pytest.mark.parametrize("mode", ["absolute", "relative"])
+@pytest.mark.parametrize("failed_frame", ["reference", "candidate", "closed", "released"])
+def test_single_visible_mapping_failure_preserves_clean_pinch(pipeline_factory, monkeypatch,
+                                                             mode, failed_frame):
+    replay = pipeline_factory(mode=mode)
+    oracle = pipeline_factory(mode=mode)
+    for item in (replay, oracle):
+        item.prime(speed=72)
+    original = replay.engine._map_pointer
+    failing_at = None
+
+    def map_pointer(pos, size):
+        return None if replay.clock.now == failing_at else original(pos, size)
+
+    monkeypatch.setattr(replay.engine, "_map_pointer", map_pointer)
+
+    def send(label, closure, dx):
+        nonlocal failing_at
+        failing_at = replay.clock.now + 1 / replay.fps if label == failed_frame else None
+        return replay.send(closure, dx=dx)
+
+    send("reference", 0.0, 0.0)
+    oracle.send(0.0, dx=0.0)
+    oracle.send(0.0, dx=72 / replay.fps)
+    expected = oracle.events("move")[-1][1:3]
+    candidate = send("candidate", 0.4, 72 / replay.fps)
+    assert candidate.pinch_phase == "candidate"
+    send("closed", 1.0, 72 / replay.fps)
+    replay.hold(.1, 1.0, dx=72 / replay.fps)
+    assert replay.snapshots[-1].pinch_phase == "confirmed"
+    replay.send(0.0, dx=72 / replay.fps)
+    replay.send(0.0, dx=72 / replay.fps)
+    released = send("released", 0.0, 72 / replay.fps)
+    assert released.pinch_phase == "released"
+    replay.hold(.3, dx=72 / replay.fps)
+    assert len(replay.events("left_down")) == len(replay.events("left_up")) == 1
+    click = replay.events("left_down")[0][1:3]
+    assert hypot(click[0] - expected[0], click[1] - expected[1]) <= 4
+    assert not replay.events("left_dragged")
+
+
+@pytest.mark.parametrize("fps", [15, 30, 60])
+@pytest.mark.parametrize("duration", [.45, .6])
+def test_slow_deliberate_closing_can_confirm_and_short_physical_hold_clicks(pipeline_factory,
+                                                                          fps, duration):
+    replay = pipeline_factory(fps)
+    replay.prime(speed=0)
+    count = round(duration * fps)
+    for index in range(1, count + 1):
+        replay.send(index / count)
+    replay.hold(.06, 1.0)
+    assert replay.snapshots[-1].pinch_phase == "confirmed"
+    replay.hold(.3)
+    assert len(replay.events("left_down")) == len(replay.events("left_up")) == 1
+    assert not replay.events("left_dragged")
+
+
+@pytest.mark.parametrize("fps", [15, 30, 60])
+def test_slow_closing_does_not_shorten_a_long_physical_hold_into_click(pipeline_factory, fps):
+    replay = pipeline_factory(fps)
+    replay.prime(speed=0)
+    for index in range(1, fps + 1):
+        replay.send(index / fps)
+    replay.hold(.1, 1.0)
+    assert replay.snapshots[-1].pinch_phase == "confirmed"
+    replay.hold(.3)
+    assert not replay.events("left_down")
+
+
+def test_loss_of_both_pointer_mappings_releases_drag_even_with_fresh_frames(pipeline_factory,
+                                                                          monkeypatch):
+    replay = pipeline_factory()
+    replay.prime(speed=0)
+    replay.hold(.15, 1.0)
+    for index in range(21):
+        replay.send(1.0, dx=90 * (index + 1) / 21)
+    assert replay.engine.action_machine.state is ActionState.DRAGGING
+    assert len(replay.events("left_down")) == 1
+    assert not replay.events("left_up")
+
+    with monkeypatch.context() as fault:
+        fault.setattr(replay.engine, "_map_pointer", lambda *args: None)
+        fault.setattr(replay.engine._joint_pointer_state[2], "map", lambda *args: None)
+        replay.send(1.0, dx=90)
+        assert len(replay.events("left_up")) == 1
+        assert replay.engine.action_machine.state is ActionState.MOVING
+        replay.hold(.5, 1.0, dx=90)
+        assert len(replay.events("left_down")) == len(replay.events("left_up")) == 1
+
+    # Mapping recovery cannot resurrect the old closed episode.
+    replay.hold(.3, 1.0, dx=90)
+    assert len(replay.events("left_down")) == 1
+    replay.hold(.4, dx=90)
+    replay.hold(.2, 1.0, dx=90)
+    replay.hold(.3, dx=90)
+    assert len(replay.events("left_down")) == len(replay.events("left_up")) == 2
+
+
+@pytest.mark.parametrize("mode", ["absolute", "relative"])
+@pytest.mark.parametrize("missing_frames", [2, 7])
+def test_multiple_missing_reference_mappings_use_only_bounded_history(pipeline_factory, monkeypatch,
+                                                                    mode, missing_frames):
+    replay = pipeline_factory(mode=mode)
+    replay.prime(speed=0)
+    with monkeypatch.context() as fault:
+        fault.setattr(replay.engine, "_map_pointer", lambda *args: None)
+        for _ in range(missing_frames):
+            replay.send()
+    admitted = replay.send(.4)
+    replay.hold(.15, 1.0)
+    replay.hold(.3)
+    if missing_frames == 2:
+        assert admitted.pinch_phase == "candidate"
+        assert len(replay.events("left_down")) == len(replay.events("left_up")) == 1
+    else:
+        assert admitted.pinch_phase == "cancelled"
+        assert admitted.pinch_reason == "pointer_history_unavailable"
+        assert not replay.events("left_down")
+    before = len(replay.events("left_down"))
+    replay.hold(.2, 1.0)
+    replay.hold(.3)
+    assert len(replay.events("left_down")) == len(replay.events("left_up")) == before + 1

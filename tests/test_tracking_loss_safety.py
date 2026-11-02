@@ -25,7 +25,6 @@ def _lost_frame():
 
 
 def _stub_lost_frame_processing(window):
-    window._update_power_mode = lambda _landmarks, **_kwargs: None
     window.tracker.update = lambda _landmarks, _shape, **_kwargs: ((100, 100), False)
     window._check_edge_lost = lambda _landmarks, _now: None
     window.classifier.classify = lambda _landmarks, **_kwargs: "pinch_hold"

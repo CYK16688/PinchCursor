@@ -14,7 +14,9 @@ from gui import main_window
 from platform_services.contracts import PlatformCapabilities, PlatformServices
 from platform_services.macos.input_controller import MacOSInputController
 from platform_services.null import (
-    GenericUIContextProvider, NullHoldShortcutMonitor, UnavailableCameraService,
+    GenericUIContextProvider,
+    NullHoldShortcutMonitor,
+    UnavailableCameraService,
     UnavailablePermissionProvider,
 )
 from tests.test_control_engine import pose
@@ -64,8 +66,8 @@ class CameraWorker:
     def wait(self, _timeout):
         return not self.running
 
-    def set_min_frame_interval(self, _interval):
-        pass
+    def set_min_frame_interval(self, interval):
+        self.min_frame_interval = interval
 
     def deleteLater(self):
         pass
@@ -147,7 +149,7 @@ def harness(tmp_path, monkeypatch):
                     worker.frame_consumer(main_window.LandmarkFrame(
                         frame, pose(name, dx=travel * index / max(1, count - 1)), clock.now * 1000,
                     ))
-                    until(lambda: runtime.metrics.processed >= target)
+                    until(lambda target=target: runtime.metrics.processed >= target)
             except BaseException as error:
                 failures.append(error)
 
@@ -266,3 +268,138 @@ def test_settings_restart_failure_reports_stopped_state(harness, monkeypatch, fa
         assert harness.window._status_override_key == "main.control_unavailable"
     else:
         assert harness.window._hold_shortcut_error_key == "main.hold_shortcut_unavailable"
+
+
+@pytest.mark.parametrize("presence", [False, True, None])
+def test_capture_ir_sample_drives_live_power_throttle(harness, presence):
+    class Infrared:
+        calls = 0
+        stopped = False
+
+        def start(self):
+            return True
+
+        def stop(self):
+            self.stopped = True
+
+        def detect_presence(self):
+            assert threading.current_thread().name == "infrared-presence"
+            self.calls += 1
+            if presence is None:
+                raise OSError("IR unavailable")
+            return presence
+
+    ir = Infrared()
+    harness.window.ir_detector = ir
+    start(harness)
+    until(lambda: ir.calls > 0)
+    harness.send(None, 303)
+    mode = "deep_sleep" if presence is False else "sleep"
+    assert harness.window.control_runtime.power_mode == mode
+    assert ir.calls > 0
+    assert harness.window.video_worker.min_frame_interval == harness.window._POWER_FRAME_INTERVALS[mode]
+    harness.send("point", 2)
+    assert harness.window.control_runtime.power_mode == "normal"
+    assert harness.window.video_worker.min_frame_interval == 0
+    assert harness.window._stop_video_worker()
+    until(lambda: ir.stopped)
+
+
+@pytest.mark.parametrize("blocked_stage", ["start", "read"])
+def test_blocked_ir_cannot_stall_gui_rgb_or_spawn_another_owner(harness, blocked_stage):
+    entered, unblock = threading.Event(), threading.Event()
+
+    class Infrared:
+        starts = 0
+
+        def start(self):
+            self.starts += 1
+            if blocked_stage == "start":
+                entered.set()
+                assert unblock.wait(3)
+            return True
+
+        def detect_presence(self):
+            if blocked_stage == "read":
+                entered.set()
+                assert unblock.wait(3)
+            return False
+
+        def stop(self):
+            pass
+
+    ir = Infrared()
+    harness.window.ir_detector = ir
+    started_at = time.monotonic()
+    start(harness)
+    owner = harness.window._ir_runtime
+    try:
+        assert time.monotonic() - started_at < 0.5
+        assert entered.wait(1)
+        harness.send(None, 303)
+        assert harness.window.control_runtime.power_mode == "sleep"
+        harness.send("point", 18)
+        assert any(kind == "move" for kind, _ in harness.native.events)
+        assert harness.window._stop_video_worker()
+        assert harness.window._start_video_worker()
+        assert harness.window._ir_runtime is owner
+        assert ir.starts == 1
+        harness.send("point", 18)
+    finally:
+        unblock.set()
+        assert owner.close(timeout=1)
+
+
+@pytest.mark.parametrize("stage", ["construct", "start"])
+def test_camera_start_exception_cleans_up_control_and_optional_owners(harness, monkeypatch, stage):
+    class BrokenCamera(CameraWorker):
+        def __init__(self, **kwargs):
+            if stage == "construct":
+                raise RuntimeError("camera construction failed")
+            super().__init__(**kwargs)
+
+        def start(self):
+            raise RuntimeError("thread could not start")
+
+    monkeypatch.setattr(main_window, "MediaPipeVideoWorker", BrokenCamera)
+    assert harness.window._start_video_worker() is False
+    assert harness.window.video_worker is None
+    assert harness.window.control_runtime is None
+    until(lambda: not harness.window._runtime_guard.release_pending)
+    assert harness.window._ir_runtime.close(timeout=1)
+
+
+def test_optional_ir_thread_start_failure_does_not_disable_rgb(harness, monkeypatch):
+    def fail_start(_owner):
+        raise RuntimeError("IR thread unavailable")
+
+    monkeypatch.setattr(main_window.IRPresenceRuntime, "start", fail_start)
+    start(harness)
+    harness.send("point", 18)
+    assert any(kind == "move" for kind, _ in harness.native.events)
+
+
+@pytest.mark.parametrize("device_id, rgb_index", [("", 0), ("windows-index-3", 3)])
+def test_ir_discovery_never_opens_the_selected_rgb_camera(monkeypatch, device_id, rgb_index):
+    from utils import camera_utils
+
+    opened = []
+
+    class Capture:
+        def isOpened(self):
+            return True
+
+        def read(self):
+            return True, np.zeros((3, 3), dtype=np.uint8)
+
+        def release(self):
+            pass
+
+    def open_camera(camera_id, system_name=None):
+        opened.append(camera_id)
+        return Capture()
+
+    monkeypatch.setattr(camera_utils, "open_camera", open_camera)
+    detector = main_window._create_ir_detector(0, device_id)
+    assert rgb_index not in opened
+    assert detector.camera_id == (1 if rgb_index == 0 else 0)

@@ -3,7 +3,8 @@
 All distances are in wrist-to-middle-MCP units, positions in camera space,
 and times in seconds. These are conservative *policies*, not learned camera
 calibration: 200 ms history/gap, 40 ms open qualification, 55 ms closed
-qualification, and 250 ms candidate timeout need real camera validation.
+qualification, 250 ms candidate inactivity and 1.5 s total closing budgets
+need real camera validation.
 Palm transport assumes a locally rigid, approximately planar palm; perspective
 or tracking changes that violate it cancel the episode rather than click.
 There is deliberately no maximum hand speed: motion consistency uses changes
@@ -92,6 +93,8 @@ class PinchIntentObserver:
     OPEN_SECONDS = 0.04
     CLOSED_SECONDS = 0.055
     CANDIDATE_SECONDS = 0.25
+    MAX_CLOSING_SECONDS = 1.5
+    PROGRESS_GAP = 0.03
     OPEN_GAP = 0.50
     CONTRACTION = 0.10
     CONTRACTION_FRACTION = 0.15
@@ -119,6 +122,8 @@ class PinchIntentObserver:
         self._release_count = 0
         self._reopen_history: deque[_Sample] = deque(maxlen=64)
         self._candidate_at: float | None = None
+        self._progress_at: float | None = None
+        self._progress_gap: float | None = None
         self._local_tip: Point | None = None
         self._reference: _Sample | None = None
         self._target: Point | None = None
@@ -190,7 +195,7 @@ class PinchIntentObserver:
             return "palm_scale"
         reference = (self._reference.palm if self._reference is not None
                      and self._phase in {"candidate", "confirmed"} else old)
-        if max(abs(a - b) for a, b in zip(palm.shape, reference.shape)) > self.MAX_SHAPE_CHANGE:
+        if max(abs(a - b) for a, b in zip(palm.shape, reference.shape, strict=False)) > self.MAX_SHAPE_CHANGE:
             return "palm_shape"
         turn = atan2(palm.up[1], palm.up[0]) - atan2(old.up[1], old.up[0])
         if abs((turn + pi) % (2 * pi) - pi) > self.MAX_ROTATION_STEP:
@@ -314,6 +319,8 @@ class PinchIntentObserver:
                     return self._evidence()
                 self._phase = "candidate"
                 self._candidate_at = now
+                self._progress_at = now
+                self._progress_gap = sample.gap
                 self._reference = reference
                 self._local_tip = reference.palm.local(reference.tip)
                 self._motion = sample.palm.transport(self._local_tip)
@@ -345,7 +352,7 @@ class PinchIntentObserver:
                 return self._evidence()
 
         other_contraction = sum(before - after > 0.22 for before, after in
-                                zip(self._reference.others, sample.others)) >= 2
+                                zip(self._reference.others, sample.others, strict=False)) >= 2
         if transition or other_contraction:
             self._cancel("transition" if transition else "other_fingers_contracting")
             return self._evidence(new=new)
@@ -358,6 +365,15 @@ class PinchIntentObserver:
             self._seen_closed = True
             if self._closed_at is None:
                 self._closed_at = now
+        # Deadlines apply before earning confirmation on this observation.
+        # Otherwise a late second confident sample could change the phase to
+        # confirmed and bypass the candidate-only timeout check below.
+        if self._phase == "candidate" and (
+                now - self._candidate_at > self.MAX_CLOSING_SECONDS
+                or (self._closed_at is not None
+                    and now - self._closed_at > self.CANDIDATE_SECONDS)):
+            self._cancel("candidate_timeout")
+            return self._evidence(new=new)
         if confident_closed:
             self._release_at = None
             self._release_count = 0
@@ -405,7 +421,14 @@ class PinchIntentObserver:
             self._release_at = None
             self._release_count = 0
             self._reopen_history.clear()
-        if (self._phase == "candidate"
-                and now - self._candidate_at > self.CANDIDATE_SECONDS):
-            self._cancel("candidate_timeout")
+        if self._phase == "candidate":
+            # A slow, deliberate closure still expresses intent while it is
+            # making physical progress. Jitter or a stationary half-pinch
+            # cannot keep the candidate alive indefinitely.
+            if self._progress_gap - sample.gap >= self.PROGRESS_GAP:
+                self._progress_at = now
+                self._progress_gap = sample.gap
+            if (self._closed_at is None
+                    and now - self._progress_at > self.CANDIDATE_SECONDS):
+                self._cancel("candidate_timeout")
         return self._evidence(new=new, movement_allowed=self._phase == "cancelled" and genuinely_open)

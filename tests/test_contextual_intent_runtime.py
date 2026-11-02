@@ -45,7 +45,6 @@ def _window_with_scrollable_target(tmp_path, monkeypatch):
 
 
 def _stub_frame_processing(window):
-    window._update_power_mode = lambda _landmarks, **_kwargs: None
     window._check_edge_lost = lambda _landmarks, _now: None
     window.classifier.classify = lambda _landmarks, **_kwargs: "none"
     window._refresh_control_session_status = lambda **_kwargs: None

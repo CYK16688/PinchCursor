@@ -6,10 +6,10 @@ from PySide6.QtWidgets import QApplication
 
 from core.action_state_machine import ActionState
 from core.control_session import SessionState
-from core.dynamic_gesture_template import DynamicGestureTemplate
 from gui import main_window
 from platform_services.contracts import ActionResult
 from tests.test_control_engine import pose
+from utils.dynamic_gesture_template import DynamicGestureTemplate
 
 
 def _template(action="scroll_up", hotkey=""):
@@ -129,7 +129,6 @@ def test_pinch_frame_never_enters_dynamic_shortcut_matching(tmp_path, monkeypatc
         window.control_session.state = SessionState.POINTER
         window.dynamic_runtime_matcher = matcher
         window.config.set("dynamic_gestures", "enabled", True)
-        window._update_power_mode = lambda _landmarks, **_kwargs: None
         window.tracker.update = lambda _landmarks, _shape, **_kwargs: ((100, 100), True)
         window._check_edge_lost = lambda _landmarks, _now: None
         window.classifier.classify = lambda _landmarks, **_kwargs: "pinch"
@@ -175,7 +174,6 @@ def test_live_dynamic_lane_does_not_claim_a_motion_without_a_saved_runtime_templ
             "enabled": False, "action": "none", "hotkey": ""
         })
         window.gesture_grace_period = 0
-        window._update_power_mode = lambda _landmarks, **_kwargs: None
         window.tracker.update = lambda _landmarks, _shape, **_kwargs: ((100, 100), True)
         window._check_edge_lost = lambda _landmarks, _now: None
         window.classifier.classify = lambda _landmarks, **_kwargs: next(gestures)
@@ -219,7 +217,6 @@ def test_dynamic_recording_owns_the_frame_and_suppresses_static_actions_and_comb
             "enabled": True, "action": "right_click", "hotkey": ""
         })
         window.gesture_grace_period = 0
-        window._update_power_mode = lambda _landmarks, **_kwargs: None
         window.tracker.update = lambda _landmarks, _shape, **_kwargs: ((100, 100), True)
         window._check_edge_lost = lambda _landmarks, _now: None
         window.classifier.classify = lambda _landmarks, **_kwargs: next(gestures)
@@ -260,7 +257,6 @@ def test_live_dynamic_shortcut_matches_only_after_a_complete_neutral_delimited_m
         window.control_session.update = lambda **_kwargs: None
         window.dynamic_runtime_matcher = matcher
         window.config.set("dynamic_gestures", "enabled", True)
-        window._update_power_mode = lambda _landmarks, **_kwargs: None
         window.tracker.update = lambda _landmarks, _shape, **_kwargs: ((100, 100), True)
         window._check_edge_lost = lambda _landmarks, _now: None
         window.classifier.classify = lambda _landmarks, **_kwargs: next(gestures)

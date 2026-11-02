@@ -18,10 +18,12 @@ def open_camera(camera_id: int, system_name: str | None = None):
     return cv2.VideoCapture(camera_id, backend)
 
 
-def detect_cameras(max_cameras: int = 10, system_name: str | None = None):
+def detect_cameras(max_cameras: int = 10, system_name: str | None = None, *, exclude_camera_ids=()):
     """Detect available cameras without assuming a Windows-only backend."""
     cameras = []
     for camera_id in range(max_cameras):
+        if camera_id in exclude_camera_ids:
+            continue
         cap = open_camera(camera_id, system_name)
         if not cap.isOpened() and camera_backend_for_platform(system_name) is not None:
             cap = cv2.VideoCapture(camera_id)

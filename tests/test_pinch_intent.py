@@ -18,7 +18,7 @@ def hand(progress=0.0, *, x=0.0, y=0.0, rotation=0.0, scale=1.0,
     points[8] = (260.0 + dx, 160.0 + dy, 0.0)
     gap = 100 * (1 - progress) + 2 * progress
     points[4] = (points[8][0] + gap * 0.8, points[8][1] + gap * 0.6, 0.0)
-    for i, offset in zip((12, 16, 20), (-10, 30, 60)):
+    for i, offset in zip((12, 16, 20), (-10, 30, 60), strict=False):
         points[i] = (320.0 + offset, 300.0, 0.0)
         if fist:
             points[i] = (320.0 + offset * .2, 385.0, 0.0)
@@ -81,7 +81,7 @@ def test_gradual_curl_reconstructs_first_closing_sample(fps):
     assert candidate.target_at == pytest.approx(t + 1 / fps)
     assert candidate.target_position == pytest.approx((260 + 36 * candidate.target_at, 160))
     assert candidate.corrections[-1][0] - candidate.corrections[0][0] <= .2 + 1e-9
-    for i in range(1, int(.12 * fps) + 2):
+    for _ in range(1, int(.12 * fps) + 2):
         now += 1 / fps
         result = observe(observer, now, 1, x=36 * now)
     assert result.phase == "confirmed"
@@ -270,9 +270,56 @@ def test_candidate_timeout_and_confidence_are_not_an_admission_bypass():
     observer = PinchIntentObserver()
     prime(observer)
     observe(observer, .44, .3)
-    for t in (.50, .56, .62, .70):
+    for t in (.50, .56, .62, .70, .76):
         result = observer.update(hand(.5), now=t, raw_pinching=True,
                                  pointing=False, pinch_confidence=.2)
+    assert result.phase == "cancelled"
+    assert result.reason == "candidate_timeout"
+
+
+def test_progressing_candidate_still_has_a_total_closing_deadline():
+    observer = PinchIntentObserver()
+    prime(observer)
+    observe(observer, .44, .3)
+    # Renew the inactivity budget with real contraction, without ever closing.
+    for index in range(1, 12):
+        result = observe(observer, .44 + .15 * index, .3 + .04 * index)
+    assert result.phase == "cancelled"
+    assert result.reason == "candidate_timeout"
+
+
+def test_candidate_jitter_does_not_renew_the_closing_budget():
+    observer = PinchIntentObserver()
+    prime(observer)
+    observe(observer, .44, .3)
+    for index in range(1, 8):
+        result = observe(observer, .44 + .04 * index, .3 + .005 * (index % 2))
+    assert result.phase == "cancelled"
+    assert result.reason == "candidate_timeout"
+
+
+def test_late_confident_sample_cannot_bypass_physical_closure_deadline():
+    observer = PinchIntentObserver()
+    prime(observer)
+    for now, confidence in ((.44, .2), (.50, .2), (.60, .2), (.64, 1.0)):
+        result = observer.update(hand(1), now=now, raw_pinching=True,
+                                 pointing=False, pinch_confidence=confidence)
+        assert result.phase == "candidate"
+    # This earns 60 ms of confidence, but first physical closure is 260 ms old.
+    result = observe(observer, .70, 1)
+    assert result.phase == "cancelled"
+    assert result.reason == "candidate_timeout"
+
+
+def test_confirmation_cannot_bypass_total_closing_deadline():
+    observer = PinchIntentObserver()
+    prime(observer)
+    observe(observer, .44, .3)
+    for index in range(1, 10):
+        result = observe(observer, .44 + .15 * index, .3 + .05 * index, raw=False)
+        assert result.phase == "candidate"
+    assert observe(observer, 1.85, 1).phase == "candidate"
+    result = observe(observer, 1.95, 1)
     assert result.phase == "cancelled"
     assert result.reason == "candidate_timeout"
 
@@ -379,19 +426,19 @@ def test_cancelled_open_pointing_can_move_before_click_rearms():
     observer = PinchIntentObserver()
     prime(observer)
     observe(observer, .44, .3)
-    for t in (.50, .56, .62, .70):
+    for t in (.50, .56, .62, .70, .76):
         cancelled = observe(observer, t, .5)
     assert cancelled.phase == 'cancelled'
     assert not cancelled.movement_allowed
-    first_open = observe(observer, .73)
+    first_open = observe(observer, .79)
     assert first_open.phase == 'cancelled'
     assert first_open.movement_allowed
     # Moving safely is independent of accepting another click.
-    early_close = observe(observer, .75, 1)
+    early_close = observe(observer, .81, 1)
     assert early_close.phase == 'cancelled'
     assert not early_close.movement_allowed
-    assert observe(observer, .78).movement_allowed
-    assert observe(observer, .83).phase == 'idle'
+    assert observe(observer, .84).movement_allowed
+    assert observe(observer, .89).phase == 'idle'
 
 
 @pytest.mark.parametrize('failure', ['timestamp', 'shape', 'transition', 'closed', 'not_pointing'])

@@ -52,6 +52,11 @@ and then `tests/conftest.py` exits the process before CPython interpreter
 finalization, because PySide6 6.12 aborts there on macOS (see the comment block
 in that file). A run is only green when all collected tests pass **and** it exits `0`.
 
+The repository also runs this suite on macOS with Python 3.13 in
+`.github/workflows/tests.yml` for pushes and pull requests. That job checks Python
+syntax and test results; it does not perform camera, IR hardware, or production
+acceptance. Full lint and static type checking remain separate engineering work.
+
 ## Build the macOS development app
 
 ```bash
@@ -115,3 +120,23 @@ Never expect a permission prompt during continuous hand tracking; permission req
 Use `gui/resources/pinchcursor.png` as the only source. See [Branding](BRANDING.md)
 for regeneration instructions and the generation record. Platform exports are
 tracked; `build/`, `dist/` and Python caches are disposable local output.
+
+## Static checks
+
+The test suite is the blocking gate. These checks cover what tests cannot see,
+and the CI workflow runs them as a separate job.
+
+That job does not fail on the repository's existing findings: it lints the
+Python files a push or pull request actually touches. Existing debt is 202 ruff
+findings and 57 type errors in `core/`, recorded here so it can be burnt down
+instead of hidden behind a flag that never fails. Shrink this list as files are
+cleaned; remove the ignore list once the tree is clean.
+
+Run them locally from the project root:
+
+- `ruff check .` - lint
+- `ruff format --check .` - formatting
+- the type check configured under `tool.mypy` - currently scoped to `core/`
+
+A hook configuration in the repository root runs the same lint on the files you
+stage, so a commit cannot introduce a new finding.

@@ -9,7 +9,7 @@ import time
 from copy import deepcopy
 from math import isfinite
 
-from core.dynamic_gesture_template import ALLOWED_DYNAMIC_ACTIONS, DynamicGestureTemplate
+from utils.dynamic_gesture_template import ALLOWED_DYNAMIC_ACTIONS, DynamicGestureTemplate
 from utils.hotkey_validation import normalize_hotkey
 from utils.locale import DEFAULT_LOCALE, normalize_locale
 
@@ -470,7 +470,7 @@ class ConfigManager:
         if not os.path.exists(self.config_path):
             return
         try:
-            with open(self.config_path, 'r', encoding='utf-8') as f:
+            with open(self.config_path, encoding='utf-8') as f:
                 loaded = json.load(f)
         except (OSError, ValueError) as exc:
             # Defaults are the only safe fallback, but the unusable file is kept
@@ -653,6 +653,10 @@ class ConfigManager:
         if key is None:
             return self.config.get(section)
         return self.config.get(section, {}).get(key)
+
+    def document(self):
+        """Expose the settings document for a read-only typed view."""
+        return self.config
 
     def set(self, section, key, value):
         """设置配置值"""

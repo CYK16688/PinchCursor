@@ -2,12 +2,20 @@
 
 from copy import deepcopy
 
-from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from gui.controls import ToggleSwitch
 from gui.i18n import tr
-from .dynamic_gesture_record_dialog import DynamicGestureRecordDialog
 from utils.config_manager import normalize_dynamic_gestures
+
+from .dynamic_gesture_record_dialog import DynamicGestureRecordDialog
 
 
 class DynamicGestureSettingsPage(QWidget):
@@ -113,8 +121,8 @@ class DynamicGestureSettingsPage(QWidget):
 
     def _start_recording_worker(self, dialog):
         """Use an isolated capture/detector lifecycle, never the live control worker."""
+        from capture.mediapipe_worker import MediaPipeVideoWorker
         from core.detector_factory import create_detector
-        from core.mediapipe_worker import MediaPipeVideoWorker
         from platform_services.camera_selection import open_configured_camera
         from utils.camera_utils import open_camera
 

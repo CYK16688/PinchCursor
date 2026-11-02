@@ -8,7 +8,6 @@ import time
 
 from platform_services.contracts import ActionResult
 
-
 MAX_FRAME_AGE_SECONDS = 0.25
 FUTURE_FRAME_TOLERANCE_SECONDS = 0.05
 
@@ -34,8 +33,10 @@ class InputGuard:
         self._controller = controller
         self._clock = clock
         self._lock = threading.RLock()
+        self._lifecycle_lock = threading.Lock()
         self._shutdown = threading.Event()
         self._thread = None
+        self._watch_retired = True
         self._enabled = False
         self._accepting = True
         self._frame_at = None
@@ -47,16 +48,32 @@ class InputGuard:
 
     def start(self, *, threaded=True):
         with self._lock:
-            self._enabled = True
-            self._accepting = True
-            self._closing = False
-            self._suspended.clear()
-            self._frame_at = None
-            self._interrupted = False
-        if threaded and (self._thread is None or not self._thread.is_alive()):
+            with self._lifecycle_lock:
+                if self._closing or self.release_pending:
+                    raise RuntimeError("Cannot start a closed guard or one with a pending release")
+                self._enabled = True
+                self._accepting = True
+                self._suspended.clear()
+                self._frame_at = None
+                self._interrupted = False
+                if threaded:
+                    self._ensure_watchdog_locked()
+
+    def _ensure_watchdog_locked(self):
+        # A thread can still be alive after committing to exit. A new owed
+        # release must have an owner even during that final interval.
+        if self._watch_retired or self._thread is None or not self._thread.is_alive():
             self._shutdown.clear()
+            self._watch_retired = False
             self._thread = threading.Thread(target=self._watch, name="input-watchdog", daemon=True)
             self._thread.start()
+
+    def _request_suspend_locked(self):
+        if self._suspended.is_set():
+            return False
+        self._suspended.set()
+        self._release_requested.set()
+        return True
 
     def observe_frame(self, timestamp):
         """Renew the lease; return whether local gesture state needs resetting."""
@@ -119,13 +136,24 @@ class InputGuard:
         # Revocation does not need the native dispatch lock. A stalled native
         # API must not stall the GUI's Stop button or allow a later frame to
         # renew the session while shutdown is waiting for that API.
-        self._suspended.set()
-        self._release_requested.set()
+        with self._lifecycle_lock:
+            # Stop and the control-owner finalizer may both suspend the same
+            # session. Once revoked, do not enqueue another release after its
+            # watchdog has already committed to exiting.
+            if not self._request_suspend_locked():
+                if self.release_pending:
+                    return ActionResult(False, "Mouse release is pending", "release_pending")
+                return ActionResult(True)
+        return self._finish_suspend(timeout)
+
+    def _finish_suspend(self, timeout):
         if self._thread is not None and self._thread.is_alive():
             # The watchdog or control-owner finalizer performs native release.
             # Even mouse-up can block, so GUI callers must not invoke it here.
             return ActionResult(False, "Mouse release is pending", "release_pending")
         if not self._lock.acquire(timeout=max(0.0, timeout)):
+            with self._lifecycle_lock:
+                self._ensure_watchdog_locked()
             return ActionResult(False, "Mouse release is pending", "release_pending")
         try:
             self._accepting = False
@@ -142,6 +170,9 @@ class InputGuard:
             result = ActionResult(False, "Mouse release failed", "release_pending")
         self._release_failed = not result.executed
         self._release_requested.clear()
+        if self._release_failed and self._suspended.is_set():
+            with self._lifecycle_lock:
+                self._ensure_watchdog_locked()
         return result
 
     def check_timeout(self):
@@ -158,22 +189,35 @@ class InputGuard:
         return None
 
     def _watch(self):
-        while not self._shutdown.wait(0.025):
-            self.check_timeout()
-            with self._lock:
-                if self._closing and not self._release_failed:
-                    return
+        try:
+            while not self._shutdown.wait(0.025):
+                self.check_timeout()
+                with self._lifecycle_lock:
+                    if self._closing and not self.release_pending:
+                        self._shutdown.set()
+                        return
+        finally:
+            with self._lifecycle_lock:
+                self._watch_retired = True
+                if self.release_pending:
+                    self._ensure_watchdog_locked()
 
     def close(self):
-        if not self._suspended.is_set():
-            self.suspend()
-        self._closing = True
-        # A temporary failure or in-flight native call must still be retried
-        # after close. Never wait on its dispatch lock on the GUI thread.
-        if self.release_pending:
-            return
-        self._shutdown.set()
-        if self._thread is not None:
+        with self._lifecycle_lock:
+            # Publish the terminal state and revoke together, so start cannot
+            # rearm input between suspension and committing to close.
+            self._closing = True
+            newly_suspended = self._request_suspend_locked()
+        if newly_suspended:
+            self._finish_suspend(0.025)
+        with self._lifecycle_lock:
+            # A temporary failure or in-flight native call must still be retried
+            # after close. Never wait on its dispatch lock on the GUI thread.
+            if self.release_pending:
+                self._ensure_watchdog_locked()
+                return
+            self._shutdown.set()
+        if self._thread is not None and self._thread is not threading.current_thread():
             self._thread.join(timeout=0.1)
 
     @property

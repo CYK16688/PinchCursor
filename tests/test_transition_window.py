@@ -2,11 +2,11 @@
 
 import json
 
+from core.control_engine import ControlEngine
 from core.telemetry import TelemetryStore
 from core.transition_episodes import PinchEpisodeTracker
 from core.transition_features import FEATURE_NAMES
 from core.transition_model import TransitionModel
-from gui.main_window import MainWindow
 
 
 class _Assessment:
@@ -20,7 +20,7 @@ class _Assessment:
 
 
 def _window(tmp_path, model=None):
-    window = MainWindow.__new__(MainWindow)
+    window = ControlEngine.__new__(ControlEngine)
     window.telemetry = TelemetryStore(str(tmp_path / "t.sqlite3"), enabled=True)
     window.pinch_episodes = PinchEpisodeTracker()
     window.transition_model = model
@@ -69,7 +69,7 @@ def test_a_shadow_model_only_adds_a_score(tmp_path):
 
 
 def test_nothing_is_recorded_and_nothing_breaks_without_telemetry(tmp_path):
-    window = MainWindow.__new__(MainWindow)
+    window = ControlEngine.__new__(ControlEngine)
     window.telemetry = None
     window.pinch_episodes = PinchEpisodeTracker()
     window.transition_model = None

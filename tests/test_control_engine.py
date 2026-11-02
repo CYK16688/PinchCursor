@@ -3,12 +3,12 @@
 These tests require neither QApplication nor camera access. Only the external
 clock, accessibility provider and OS event sink are simulated.
 """
-from copy import deepcopy
-from dataclasses import FrozenInstanceError
-from types import SimpleNamespace
 import subprocess
 import sys
 import threading
+from copy import deepcopy
+from dataclasses import FrozenInstanceError
+from types import SimpleNamespace
 
 import pytest
 
@@ -18,8 +18,11 @@ from core.control_engine import ControlEngine, HandObservation
 from core.control_session import SessionState
 from core.pointer_mapping import ScreenBounds
 from platform_services.contracts import (
-    ActionResult, AuthorizationState, PermissionSnapshot, PlatformCapabilities,
-    PlatformServices, UIContext,
+    AuthorizationState,
+    PermissionSnapshot,
+    PlatformCapabilities,
+    PlatformServices,
+    UIContext,
 )
 from platform_services.macos.input_controller import MacOSInputController
 from platform_services.policy import ContextPolicy
@@ -330,7 +333,7 @@ def test_persisted_optional_settings_are_restored(replay):
 
 
 def test_dynamic_completed_takes_rearm_without_losing_cooldown(replay):
-    from core.dynamic_gesture_template import DynamicGestureMatcher
+    from utils.dynamic_gesture_template import DynamicGestureMatcher
     frames = [pose("open_hand", dx=index * 50) for index in range(8)]
     sample = DynamicGestureMatcher().prepare_recording(frames)
     assert sample is not None
@@ -431,7 +434,8 @@ def test_core_scroll_requires_point_dwell_and_loses_it_on_hand_loss(replay):
 @pytest.mark.parametrize("lane", ["combo", "dynamic"])
 def test_optional_one_shot_warms_cold_context_before_commit(replay, lane):
     from dataclasses import replace
-    from core.dynamic_gesture_template import DynamicGestureMatcher
+
+    from utils.dynamic_gesture_template import DynamicGestureMatcher
 
     class ColdContext:
         """The first request schedules work; later reads expose cached policy."""

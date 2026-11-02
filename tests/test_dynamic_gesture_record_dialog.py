@@ -4,9 +4,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from core.mediapipe_worker import LandmarkFrame
+from capture.mediapipe_worker import LandmarkFrame
+from gui.dynamic_gesture_record_dialog import DynamicGestureRecordDialog, DynamicRecordingState
 from gui.i18n import set_locale
-from gui.dynamic_gesture_record_dialog import DynamicRecordingState, DynamicGestureRecordDialog
 
 
 def landmarks():

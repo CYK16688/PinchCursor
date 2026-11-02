@@ -1,0 +1,53 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # Blocking gate: syntax plus the whole suite. A red test fails the branch.
+  tests:
+    runs-on: macos-14
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install runtime and test dependencies
+        run: python -m pip install -e '.[macos,test]'
+      - name: Check Python syntax
+        run: python -m compileall -q core capture gui platform_services utils main.py
+      - name: Run tests
+        run: python -m pytest -q
+  # Real gate, scoped while the tree is still dirty: only the Python files this
+  # push or pull request touches have to be clean. Every other file keeps its
+  # existing findings, so switching the gate on cannot redden the branch on day
+  # one.
+  lint:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install lint tools
+        run: python -m pip install ruff==0.17.3
+      - name: Lint changed Python files
+        run: |
+          files=""
+          if git show -s HEAD~1 > /dev/null 2>&1; then
+            files=$(git diff --name-only HEAD~1 HEAD -- '*.py')
+          fi
+          if [ -z "$files" ]; then
+            echo "no changed python files"
+            exit 0
+          fi
+          echo "$files"
+          ruff check $files

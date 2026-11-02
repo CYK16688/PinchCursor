@@ -1,55 +1,76 @@
 """主窗口 - PySide6 GUI"""
 
-import cv2
 import os
 import platform
 import time
 import traceback
-from collections import deque
-from dataclasses import dataclass, replace
 from copy import deepcopy
+from dataclasses import dataclass, replace
 from math import isfinite
 from numbers import Real
-from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QApplication, QPushButton, QLabel, QFrame, QSizePolicy, QStackedLayout
-)
-from PySide6.QtCore import QSize, Qt, QTimer, QRect, QRectF, Signal
-from PySide6.QtGui import QCursor, QImage, QKeySequence, QPixmap, QPainter, QShortcut
 
-from core.base_detector import BaseHandDetector
-from core.detector_factory import create_detector
-from core.gesture_classifier import GestureClassifier
+import cv2
+from PySide6.QtCore import QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QCursor, QImage, QKeySequence, QPainter, QPixmap, QShortcut
+from PySide6.QtWidgets import (
+    QApplication,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QPushButton,
+    QSizePolicy,
+    QStackedLayout,
+    QVBoxLayout,
+    QWidget,
+)
+
+from capture.mediapipe_worker import LandmarkFrame, MediaPipeVideoWorker
 from core.action_coordinator import GestureActionCoordinator
 from core.action_state_machine import ActionState, ActionStateMachine
-from core.assist.features import build_features
 from core.adaptive_tuning import tune_snapping
-from core.transition_episodes import PinchEpisodeTracker
-from core.transition_model import TransitionModel
 from core.assist.ranker import LinearRanker
-from core.assist.target_model import Target, TargetModel
-from core.hand_dynamics import HandDynamics
-from core.performance import preset_for
-from core.pointer_mapping import AbsoluteMapper, RelativeMapper, ScreenBounds
-from core.telemetry import TelemetryStore, default_path
+from core.assist.target_model import TargetModel
+from core.async_services import AsyncContextProvider, AsyncTelemetry
+from core.base_detector import BaseHandDetector
 from core.combo_detector import ComboDetector
-from core.intent_arbiter import IntentArbiter, IntentDecision
-from core.input_guard import frame_is_fresh
-
-from core.control_session import ActivationMode, ControlSession, SessionState
+from core.contextual_intent import ContextualIntentController
 from core.control_engine import ControlEngine, HandObservation
 from core.control_runtime import ControlRuntime
-from core.async_services import AsyncContextProvider, AsyncTelemetry
-from core.mediapipe_worker import LandmarkFrame, MediaPipeVideoWorker
-from core.static_gesture_template import StaticGestureMatcher, StaticGestureTemplate
-from core.dynamic_gesture_template import DynamicGestureMatcher, DynamicGestureTemplate
+from core.control_session import ActivationMode, ControlSession, SessionState
+from core.detector_factory import create_detector
 from core.dynamic_intent_lifecycle import DynamicIntentLifecycle
-from core.contextual_intent import ContextualIntentController
+from core.gesture_classifier import GestureClassifier
+from core.hand_dynamics import HandDynamics
+from core.input_guard import frame_is_fresh
+from core.intent_arbiter import IntentArbiter, IntentDecision
+from core.ir_presence import IRPresenceRuntime
+from core.performance import preset_for
+from core.pointer_mapping import AbsoluteMapper, RelativeMapper, ScreenBounds
+from core.pointer_projection import project
+from core.power_policy import FRAME_SECONDS
+from core.static_gesture_template import StaticGestureMatcher
+from core.telemetry import TelemetryStore, default_path
+from core.transition_episodes import PinchEpisodeTracker
+from core.transition_model import TransitionModel
+from gui import icons
+from gui.gesture_guide import GestureGuide
+from gui.gesture_icons_svg import GestureIconsSVG
+from gui.hud_state import HudController, HudState
+from gui.i18n import set_locale, tr
+from gui.interaction_feedback import InteractionFeedbackPresenter, interaction_feedback_model
+from gui.interaction_panel import InteractionPanel
+from gui.overlay import GestureOverlay
+from gui.summary_row import SummaryRow
+from gui.theme import DARK_THEME, use_styled_background
 from platform_services.camera_selection import open_configured_camera
 from platform_services.contracts import ActionRequest
 from platform_services.factory import create_platform_services
 from platform_services.policy import ContextPolicy
 from utils.camera_utils import open_camera
+from utils.config_manager import ConfigManager, last_load_error
+from utils.settings import effective_assist
+from utils.settings import read as read_settings
 from utils.smoothing import (
     CURSOR_SMOOTHING_BETA,
     DEFAULT_DEAD_ZONE,
@@ -57,22 +78,22 @@ from utils.smoothing import (
     mincutoff_for_smoothing,
 )
 from utils.tracker import TargetTracker
-from utils.config_manager import ConfigManager, last_load_error
-from gui import icons
-from gui.gesture_icons_svg import GestureIconsSVG
-from gui.theme import DARK_THEME, use_styled_background
-from gui.overlay import GestureOverlay
-from gui.summary_row import SummaryRow
-from gui.hud_state import HudController, HudState
-from gui.interaction_feedback import InteractionFeedbackPresenter, interaction_feedback_model
-from gui.interaction_panel import InteractionPanel
-from gui.gesture_guide import GestureGuide
-from gui.i18n import set_locale, tr
-
 
 # A capture backend can block in read(). Keep its QThread alive until it exits,
 # even when the owning window closes; deleting a running QThread aborts Qt.
 _RETIRING_VIDEO_WORKERS = set()
+
+
+def _create_ir_detector(rgb_camera_id, selected_device_id=""):
+    """Discover optional IR hardware on its owner thread, away from Qt/RGB."""
+    from platform_services.windows.camera import WindowsCameraService
+    from utils.camera_utils import IRPresenceDetector, detect_cameras, find_ir_camera
+
+    selected_index = WindowsCameraService.index_for_device(selected_device_id)
+    if selected_index is not None:
+        rgb_camera_id = selected_index
+    camera_id = find_ir_camera(detect_cameras(exclude_camera_ids={rgb_camera_id}))
+    return IRPresenceDetector(camera_id) if camera_id is not None and camera_id != rgb_camera_id else None
 
 
 def _hand_observation(landmark_frame, shortcut_held=False):
@@ -190,17 +211,20 @@ class MainWindow(QMainWindow):
         "low": "main.status.low_power",
     }
     _ACTION_ERROR_KEYS = {
-        "accessibility_permission_required": "main.control_unavailable",
-        "missing_hotkey": "main.control_unavailable",
-        "invalid_hotkey": "main.control_unavailable",
-        "unsupported_action": "main.control_unavailable",
-        "context_target_unavailable": "main.control_unavailable",
-        "context_target_changed": "main.control_unavailable",
-        "gesture_blocked": "main.control_unavailable",
-        "action_blocked": "main.control_unavailable",
-        "missing_coordinates": "main.control_unavailable",
-        "drag_not_started": "main.control_unavailable",
-        "no_action": "main.control_unavailable",
+        "accessibility_permission_required": "main.error.permission",
+        "missing_hotkey": "main.error.shortcut",
+        "invalid_hotkey": "main.error.shortcut",
+        "unsupported_action": "main.error.unsupported",
+        "context_target_unavailable": "main.error.target",
+        "context_target_changed": "main.error.target",
+        "gesture_blocked": "main.error.blocked",
+        "action_blocked": "main.error.blocked",
+        "missing_coordinates": "main.error.tracking",
+        "drag_not_started": "main.error.drag",
+        "no_action": "main.error.unsupported",
+        "stale_frame": "main.error.tracking",
+        "session_stopped": "main.error.stopped",
+        "release_pending": "main.error.release",
     }
     _STATUS_OVERRIDE_KEYS = {
         "main.selected_camera_unavailable": "main.selected_camera_unavailable",
@@ -273,6 +297,7 @@ class MainWindow(QMainWindow):
         self.screen_bounds = self._compute_screen_bounds()
         self.screen_w, self.screen_h = self.screen_bounds.width, self.screen_bounds.height
         self.pointer_mapper = AbsoluteMapper()
+        self.clock = time.monotonic
         self._pointer_anchor_pending = True
         self._last_frame_time = float("-inf")
 
@@ -345,23 +370,15 @@ class MainWindow(QMainWindow):
         self.gesture_grace_period = 0.2       # 手势变化后的等待时间(秒)
 
         # 节能模式参数
-        self.no_hand_frames = 0  # 连续无手帧数
         self.power_mode = "normal"  # normal, low, sleep, deep_sleep
         # Seconds between inference passes per mode. "normal" is unthrottled so
         # an active hand keeps its full frame rate; the deeper modes trade
         # wake-up latency for power while nothing is being tracked.
-        self._POWER_FRAME_INTERVALS = {
-            "normal": 0.0,
-            "low": 1.0 / 15.0,
-            "sleep": 1.0 / 5.0,
-            "deep_sleep": 1.0 / 2.0,
-        }
-        self.LOW_THRESHOLD = 30    # 30帧无手进入低功耗
-        self.SLEEP_THRESHOLD = 150 # 150帧无手进入休眠
-        self.DEEP_SLEEP_THRESHOLD = 300  # 300帧无手进入深度休眠
+        self._POWER_FRAME_INTERVALS = FRAME_SECONDS
 
         # 红外人体检测器
         self.ir_detector = None
+        self._ir_runtime = None
 
         # 边缘丢失提示
         self.edge_lost_time = None  # 边缘丢失时间
@@ -459,32 +476,48 @@ class MainWindow(QMainWindow):
 
     def _refresh_pointer_mapping(self):
         """Rebuild the hand-to-screen strategy from configuration."""
-        mapping = self.config.get("pointer_mapping") or {}
-        mode = mapping.get("mode", "absolute")
+        mapping = read_settings(self.config.document()).mapping
         try:
-            gain = float(mapping.get("gain", 2.0))
-            mapper = RelativeMapper(gain) if mode == "relative" else AbsoluteMapper()
+            mapper = (RelativeMapper(mapping.gain)
+                      if mapping.mode == "relative" else AbsoluteMapper())
         except (TypeError, ValueError):
             mapper = AbsoluteMapper()
         self.screen_bounds = self._compute_screen_bounds()
         self.screen_w, self.screen_h = self.screen_bounds.width, self.screen_bounds.height
         self.pointer_mapper = mapper
         self._pointer_anchor_pending = True
+        self._bind_screen_signals()
+
+    def _bind_screen_signals(self):
+        """Recompute the mapping bounds when the display arrangement changes."""
+        if getattr(self, "_screen_signals_bound", False):
+            return
+        app = QApplication.instance()
+        if app is None:
+            return
+        for event in (app.screenAdded, app.screenRemoved, app.primaryScreenChanged):
+            event.connect(self._on_screen_change)
+        self._screen_signals_bound = True
+
+    def _on_screen_change(self, *_args):
+        """Adopt the new desktop rectangle and re-anchor the relative mapping."""
+        self.screen_bounds = self._compute_screen_bounds()
+        self.screen_w, self.screen_h = self.screen_bounds.width, self.screen_bounds.height
+        self._pointer_anchor_pending = True
 
     def _map_pointer(self, pos, frame_size):
         """Map one hand position to screen points, anchoring relative mode."""
+
+        def current_cursor():
+            point = QCursor.pos()
+            return (point.x(), point.y())
+
         pending = getattr(self, "_pointer_anchor_pending", False)
-        if pending and isinstance(self.pointer_mapper, RelativeMapper):
-            # A physical mouse may have moved during the pause. Reacquire the
-            # actual pointer rather than our last unfiltered mapping result.
-            current = QCursor.pos()
-            cursor = (current.x(), current.y())
-            self.pointer_mapper.begin(pos, frame_size, self.screen_bounds, cursor=cursor)
-            if hasattr(self, "smoother"):
-                self.smoother.reset()
         self._pointer_anchor_pending = False
-        mapped = self.pointer_mapper.map(pos, frame_size, self.screen_bounds)
-        return mapped
+        return project(
+            self.pointer_mapper, self.screen_bounds, pos, frame_size,
+            anchor_pending=pending, cursor_position=current_cursor,
+        )
 
     def _refresh_telemetry(self):
         """Rebuild the local event log; disabled means it never opens a file."""
@@ -498,66 +531,13 @@ class MainWindow(QMainWindow):
             self.telemetry.close()
         self.telemetry = TelemetryStore(path, enabled=enabled)
 
-    def _observe_pinch_episode(self, gesture, assessment, now):
-        """Fold one frame into the episode tracker and store what resolved.
+    # Synchronous replay uses the engine implementation, so legacy fixtures
+    # and live control cannot silently diverge.
+    _observe_pinch_episode = ControlEngine._observe_pinch_episode
 
-        Recording is gated on telemetry: with the log off there is nowhere for a
-        row to go, and the tracker's buffer would only grow for nothing.
-        """
-        store = getattr(self, "telemetry", None)
-        tracker = getattr(self, "pinch_episodes", None)
-        if tracker is None or store is None or not getattr(store, "enabled", False):
-            return
-        try:
-            records = tracker.observe(gesture=gesture, assessment=assessment, now=now)
-        except Exception:  # noqa: BLE001 - evidence collection is never the control path
-            return
-        model = getattr(self, "transition_model", None)
-        for record in records:
-            try:
-                score = model.probability(record.features) if model is not None else None
-            except Exception:  # noqa: BLE001
-                score = None
-            try:
-                store.record_transition(
-                    features=record.features,
-                    label=record.label,
-                    outcome=record.outcome,
-                    rule_rejected=record.rule_rejected,
-                    duration=record.duration,
-                    model_score=score,
-                )
-            except Exception:  # noqa: BLE001
-                continue
+    _note_episode_action = ControlEngine._note_episode_action
 
-    def _note_episode_action(self, action, now):
-        """Tell the tracker that a click or drag was actually dispatched."""
-        tracker = getattr(self, "pinch_episodes", None)
-        if tracker is None:
-            return
-        try:
-            tracker.note_action(action, now)
-        except Exception:  # noqa: BLE001
-            pass
-
-    def _apply_dynamics(self, gesture, assessment):
-        """Downgrade a pinch the hand is only passing through.
-
-        A fist closes through the pinch shape; without this the click fires on
-        the way to an exit gesture. The guard only acts while the state machine
-        is still moving, so an in-flight click or drag is never disturbed.
-        """
-        if assessment is None or gesture not in ("pinch", "pinch_hold"):
-            return gesture
-        if (self.config.get("temporal") or {}).get("transition_guard", True) is not True:
-            return gesture
-        if self.action_machine.state is not ActionState.MOVING:
-            return gesture
-        if assessment.transition:
-            return "point"
-        if gesture == "pinch" and assessment.pinch_confidence < 0.45:
-            return "point"
-        return gesture
+    _apply_dynamics = ControlEngine._apply_dynamics
 
     def _cached_context(self, x, y):
         """Return the AX context, reusing the last hit for a few frames.
@@ -580,22 +560,7 @@ class MainWindow(QMainWindow):
         self._context_cache = (x, y, time.monotonic(), context)
         return context
 
-    def _record_telemetry_action(self, *, action, executed, gesture, context, x, y, latency_ms):
-        """Log one dispatcher outcome. Never affects control flow."""
-        store = getattr(self, "telemetry", None)
-        if store is None:
-            return
-        store.record(
-            "action",
-            action=action,
-            executed=executed,
-            gesture=gesture,
-            category=getattr(context, "category", "") or "",
-            role=getattr(context, "native_role", "") or "",
-            x=x,
-            y=y,
-            latency_ms=latency_ms,
-        )
+    _record_telemetry_action = ControlEngine._record_telemetry_action
 
     def _refresh_pointer_assist(self):
         """Rebuild the aiming assist and attach it to the lock transition.
@@ -604,7 +569,7 @@ class MainWindow(QMainWindow):
         the deterministic pointer lane keeps full authority over every frame.
         """
         assist = self.config.get("pointer_assist") or {}
-        distance, confidence = self._effective_assist_values(assist)
+        distance, confidence = effective_assist(assist)
         try:
             model = TargetModel(
                 max_snap_distance=distance,
@@ -633,39 +598,6 @@ class MainWindow(QMainWindow):
             self.assist_mode = "bayesian"
         self.action_machine.snap_provider = self._snap_cursor_position
 
-    @staticmethod
-    def _effective_assist_values(assist) -> tuple[float, float]:
-        """Configured assist values, overridden by a learned step when present.
-
-        Reading through this one function keeps the model, the diagnostics page
-        and the tuner's own next input from disagreeing about what is in force.
-        """
-        learned = assist.get("learned")
-        learned = learned if isinstance(learned, dict) else {}
-        # A learned step is anchored to the values it started from. When the
-        # user edits the configured numbers, their choice wins and the stale
-        # adaptation is ignored instead of quietly overriding it.
-        if learned and (
-            learned.get("base_max_snap_distance") != assist.get("max_snap_distance")
-            or learned.get("base_min_confidence") != assist.get("min_confidence")
-        ):
-            learned = {}
-
-        def pick(key, default):
-            for source in (learned, assist):
-                raw = source.get(key)
-                if raw is None or isinstance(raw, bool):
-                    continue
-                try:
-                    number = float(raw)
-                except (TypeError, ValueError):
-                    continue
-                if number != number or number in (float("inf"), float("-inf")):
-                    continue
-                return number
-            return default
-
-        return pick("max_snap_distance", 24.0), pick("min_confidence", 0.55)
 
     def _apply_adaptive_tuning(self):
         """Move the aim assist one bounded step from local click outcomes.
@@ -708,7 +640,7 @@ class MainWindow(QMainWindow):
                 last_clicks = 0
             if clicks <= last_clicks:
                 return None
-        distance, confidence = self._effective_assist_values(assist)
+        distance, confidence = effective_assist(assist)
         tuning = tune_snapping(
             max_snap_distance=distance,
             min_confidence=confidence,
@@ -765,153 +697,11 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001 - a bad model file is not a startup failure
             self.transition_model = None
 
-    def _snap_cursor_position(self, pos):
-        """Return the assisted lock position for one raw pointer position."""
-        model = getattr(self, "target_model", None)
-        if model is None or pos is None:
-            return None
-        probe = getattr(self.platform_services.context_provider, "probe_targets", None)
-        if probe is None:
-            return None
-        try:
-            x, y = int(pos[0]), int(pos[1])
-        except (TypeError, IndexError, ValueError):
-            return None
-        # Probing matters only inside the distance the cursor may actually
-        # travel, so the pattern covers that disc instead of a wide annulus
-        # whose candidates could never be snapped to.
-        radius = int(max(24.0, min(60.0, model.max_snap_distance)))
-        try:
-            contexts = probe(x, y, radius)
-        except Exception:  # noqa: BLE001 - assist must never break the click lane
-            return None
-        targets = []
-        for context in contexts:
-            bounds = getattr(context, "bounds", None)
-            if bounds is None:
-                continue
-            targets.append(
-                Target(
-                    target_id=f"{context.native_role}:{bounds}",
-                    bounds=bounds,
-                    role=context.native_role,
-                    enabled=getattr(context, "is_enabled", True),
-                )
-            )
-        decision = model.choose(x, y, targets)
+    _snap_cursor_position = ControlEngine._snap_cursor_position
 
-        # Posteriors are shared by logging, the learned ranker, and the
-        # deterministic choice, so no two consumers disagree about the numbers.
-        posteriors = {target.target_id: value for target, value in model.posteriors(x, y, targets)}
+    _record_candidates = ControlEngine._record_candidates
 
-        store = getattr(self, "telemetry", None)
-        if store is not None and targets:
-            self._record_candidates(store, x, y, targets, posteriors, decision)
-
-        ranker = getattr(self, "ranker", None)
-        if ranker is not None and targets:
-            ranker_decision = None
-            try:
-                ranker_decision = ranker.choose(
-                (x, y),
-                (self.screen_bounds.x, self.screen_bounds.y,
-                 self.screen_bounds.width, self.screen_bounds.height),
-                targets,
-                posteriors,
-                    min_confidence=model.min_confidence,
-                    max_snap_distance=model.max_snap_distance,
-                )
-            except Exception:  # noqa: BLE001 - a model must never break the click lane
-                ranker_decision = None
-            if self.assist_mode == "shadow" and store is not None:
-                store.record(
-                    "shadow",
-                    action=(ranker_decision.target_id if ranker_decision else "")[:64],
-                    confidence=(ranker_decision.confidence if ranker_decision else 0.0),
-                    category=("agrees" if ranker_decision and decision
-                              and ranker_decision.target_id == decision.target_id else "differs"),
-                )
-            elif self.assist_mode == "ranker" and ranker_decision is not None:
-                decision = ranker_decision
-
-        if decision is None:
-            return None
-        if store is not None:
-            chosen = next((t for t in targets if t.target_id == decision.target_id), None)
-            categories = {
-                f"{c.native_role}:{c.bounds}": c.category for c in contexts if c.bounds
-            }
-            store.record(
-                "assist",
-                category=categories.get(decision.target_id, ""),
-                role=chosen.role if chosen is not None else "",
-                confidence=decision.confidence,
-                snap_distance=((decision.x - x) ** 2 + (decision.y - y) ** 2) ** 0.5,
-                x=decision.x,
-                y=decision.y,
-            )
-        return (decision.x, decision.y)
-
-    def _record_candidates(self, store, x, y, targets, posteriors, decision):
-        """Log every candidate with the features the ranker would consume."""
-        screen = (self.screen_bounds.x, self.screen_bounds.y,
-                  self.screen_bounds.width, self.screen_bounds.height)
-        rows = build_features((x, y), screen, targets, posteriors)
-        chosen_bayes = decision.target_id if decision is not None else ""
-        raw_hits = [t for t in targets if _point_inside(x, y, t.bounds)]
-        chosen_raw = raw_hits[0].target_id if len(raw_hits) == 1 else ""
-        payload = []
-        for target, row in zip(targets, rows):
-            bx, by, bw, bh = target.bounds
-            centre_x, centre_y = bx + bw / 2.0, by + bh / 2.0
-            payload.append({
-                "role": target.role,
-                "x": bx, "y": by, "w": bw, "h": bh,
-                "dist": ((x - centre_x) ** 2 + (y - centre_y) ** 2) ** 0.5,
-                "inside": target.target_id in {t.target_id for t in raw_hits},
-                "bayes": posteriors.get(target.target_id, 0.0),
-                "features": row,
-                "chosen_bayes": target.target_id == chosen_bayes,
-                "chosen_raw": target.target_id == chosen_raw,
-            })
-        store.record_candidates(f"{int(time.monotonic() * 1000)}-{x}-{y}", payload)
-
-    @staticmethod
-    def _restore_static_templates(template_dicts):
-        """Convert valid persisted custom-trigger dictionaries into runtime templates."""
-        if not isinstance(template_dicts, list):
-            return {}
-
-        templates = {}
-        for template_dict in template_dicts:
-            if not isinstance(template_dict, dict):
-                continue
-            try:
-                feature_vector = tuple(template_dict["feature_vector"])
-                raw_threshold = template_dict.get("threshold", 0.18)
-            except (KeyError, TypeError):
-                continue
-            if (
-                len(feature_vector) != 63
-                or not isinstance(raw_threshold, Real)
-                or isinstance(raw_threshold, bool)
-                or not all(
-                    isinstance(value, Real) and not isinstance(value, bool) and isfinite(value)
-                    for value in feature_vector
-                )
-                or not isfinite(raw_threshold)
-                or raw_threshold <= 0
-            ):
-                continue
-            template = StaticGestureTemplate(
-                template_id=str(template_dict.get("template_id", "")),
-                name=str(template_dict.get("name", "")),
-                feature_vector=tuple(float(value) for value in feature_vector),
-                threshold=float(raw_threshold),
-            )
-            if template.template_id:
-                templates[template.template_id] = template
-        return templates
+    _restore_static_templates = ControlEngine._restore_static_templates
 
     def _refresh_control_session_from_config(self, session_cfg=None):
         """Rebuild the live control gate from the currently saved session settings."""
@@ -939,55 +729,9 @@ class MainWindow(QMainWindow):
             matcher=self.static_gesture_matcher,
         )
 
-    def _restore_dynamic_templates(self, template_dicts):
-        """Convert persisted, normalized dynamic shortcut records into runtime templates."""
-        templates = []
-        if not isinstance(template_dicts, list):
-            return templates
-        for item in template_dicts:
-            if not isinstance(item, dict):
-                continue
-            try:
-                samples = tuple(
-                    tuple(tuple(frame) for frame in sample)
-                    for sample in item["samples"]
-                )
-                templates.append(DynamicGestureTemplate(
-                    template_id=item["template_id"],
-                    name=item["name"],
-                    action=item["action"],
-                    samples=samples,
-                    threshold=item["threshold"],
-                    cooldown_seconds=item["cooldown_seconds"],
-                    min_motion_energy=item["min_motion_energy"],
-                    context_category=str(item.get("context_category", "")),
-                ))
-            except (KeyError, TypeError, ValueError):
-                continue
-        return templates
+    _restore_dynamic_templates = ControlEngine._restore_dynamic_templates
 
-    def _refresh_dynamic_shortcuts_from_config(self):
-        """Restore user-recorded motion shortcuts after a successful Settings save."""
-        self._clear_dynamic_shortcut_observation()
-        dynamic = self.config.get("dynamic_gestures") or {}
-        defaults = dynamic.get("defaults") or {}
-        self.dynamic_intent_lifecycle = DynamicIntentLifecycle(
-            neutral_rearm_frames=defaults.get("neutral_rearm_frames", 3),
-            end_neutral_frames=defaults.get("end_neutral_frames", 2),
-            max_recording_frames=defaults.get("max_recording_frames", 180),
-            max_duration_seconds=defaults.get("max_duration_seconds", 3.0),
-        )
-        self.dynamic_landmark_frames = deque(
-            maxlen=self.dynamic_intent_lifecycle.max_recording_frames
-        )
-        self.dynamic_templates = []
-        self.dynamic_runtime_matcher = None
-        if not dynamic.get("enabled", True):
-            return
-        self.dynamic_templates = self._restore_dynamic_templates(dynamic.get("templates") or [])
-        if self.dynamic_templates:
-            matcher = DynamicGestureMatcher()
-            self.dynamic_runtime_matcher = matcher.create_runtime_matcher(self.dynamic_templates)
+    _refresh_dynamic_shortcuts_from_config = ControlEngine._refresh_dynamic_shortcuts_from_config
 
     def _dispatch_completed_dynamic_shortcut(self, completed_frames, anchor, *, now):
         """Match and dispatch one lifecycle-completed optional semantic motion."""
@@ -1083,17 +827,7 @@ class MainWindow(QMainWindow):
         self.dynamic_landmark_frames.clear()
         return observation, matched
 
-    def _clear_dynamic_shortcut_observation(self):
-        """Discard partial motion when its continuous hand tracking breaks."""
-        lifecycle = getattr(self, "dynamic_intent_lifecycle", None)
-        if lifecycle is not None:
-            lifecycle.reset()
-        frames = getattr(self, "dynamic_landmark_frames", None)
-        if frames is not None:
-            frames.clear()
-        matcher = getattr(self, "dynamic_runtime_matcher", None)
-        if matcher is not None and hasattr(matcher, "reset"):
-            matcher.reset()
+    _clear_dynamic_shortcut_observation = ControlEngine._clear_dynamic_shortcut_observation
 
     def _reset_gesture_observation_state(self):
         """Clear optional command candidates at a safety boundary."""
@@ -1346,7 +1080,7 @@ class MainWindow(QMainWindow):
         self.primary_control_button.setFocus(Qt.OtherFocusReason)
         order = [self.primary_control_button, self.settings_btn, *self.summary_rows.values(),
                  self.gesture_reference.more, self.gesture_reference.configure]
-        for previous, following in zip(order, order[1:]):
+        for previous, following in zip(order, order[1:], strict=False):
             self.setTabOrder(previous, following)
 
     def _session_hint_text(self):
@@ -1590,6 +1324,28 @@ class MainWindow(QMainWindow):
         self._runtime_guard = coordinator.input_guard
         self._runtime_context = context
         self._runtime_telemetry = telemetry
+        ir_runtime = getattr(self, "_ir_runtime", None)
+        # A stuck native IR call retains its owner until it returns. Keep RGB
+        # available without launching another thread for the same device.
+        if ir_runtime is None or ir_runtime.close(timeout=0.0):
+            detector = self.ir_detector
+            if detector is not None:
+                def factory():
+                    return detector
+            elif platform.system() == "Windows":
+                rgb_id = camera_config.get("id", 0)
+                selected_id = camera_config.get("device_id", "")
+                def factory():
+                    return _create_ir_detector(rgb_id, selected_id)
+            else:
+                factory = None
+            ir_runtime = IRPresenceRuntime(factory)
+            self._ir_runtime = ir_runtime
+            try:
+                ir_runtime.start()
+            except Exception:
+                # Failure to create an optional owner must not disable input.
+                ir_runtime.close(timeout=0.0)
         detector_type = self.detector_type
         detection_confidence = self.detection_confidence
         tracking_confidence = self.tracking_confidence
@@ -1606,30 +1362,36 @@ class MainWindow(QMainWindow):
             except Exception:
                 held = False
             observation = _hand_observation(landmark_frame, held)
+            # Read only a fresh cached sample; IR cannot block RGB capture.
+            runtime.set_ir_presence(ir_runtime.presence)
             preview = LandmarkFrame(landmark_frame.frame, observation.landmarks,
                                     getattr(landmark_frame, "timestamp_ms", None))
             runtime.submit(observation, preview)
             if worker is not None:
                 worker.set_min_frame_interval(intervals.get(runtime.power_mode, 0.0))
 
-        worker = MediaPipeVideoWorker(
-            camera_id=camera_config.get("id", 0),
-            width=preset.camera_width if preset.is_performance else camera_config.get("width", 640),
-            height=preset.camera_height if preset.is_performance else camera_config.get("height", 480),
-            detector_factory=lambda: create_detector(
-                detector_type, detection_confidence, tracking_confidence, delegate=preset.delegate,
-            ),
-            capture_opener=lambda: open_configured_camera(
-                camera_config, services.camera_service, legacy_open=open_camera,
-            ),
-            parent=self,
-            frame_consumer=consume,
-        )
-        self.video_worker = worker
-        worker.source_ready.connect(self._on_source_ready)
-        worker.source_error.connect(self._on_source_error)
-        runtime.start()
-        worker.start()
+        try:
+            worker = MediaPipeVideoWorker(
+                camera_id=camera_config.get("id", 0),
+                width=preset.camera_width if preset.is_performance else camera_config.get("width", 640),
+                height=preset.camera_height if preset.is_performance else camera_config.get("height", 480),
+                detector_factory=lambda: create_detector(
+                    detector_type, detection_confidence, tracking_confidence, delegate=preset.delegate,
+                ),
+                capture_opener=lambda: open_configured_camera(
+                    camera_config, services.camera_service, legacy_open=open_camera,
+                ),
+                parent=self,
+                frame_consumer=consume,
+            )
+            self.video_worker = worker
+            worker.source_ready.connect(self._on_source_ready)
+            worker.source_error.connect(self._on_source_error)
+            runtime.start()
+            worker.start()
+        except Exception:
+            self._stop_video_worker()
+            return False
         return True
 
     def _stop_control_runtime(self):
@@ -1747,6 +1509,9 @@ class MainWindow(QMainWindow):
             self._on_worker_error(message)
 
     def _stop_video_worker(self):
+        ir_runtime = getattr(self, "_ir_runtime", None)
+        if ir_runtime is not None:
+            ir_runtime.close(timeout=0.0)
         stopped = self._stop_control_runtime()
         if self.video_worker:
             worker = self.video_worker
@@ -1912,22 +1677,7 @@ class MainWindow(QMainWindow):
     # unreadable; only deliberate, discrete actions are worth remembering.
     _CONTINUOUS_ACTIONS = frozenset({"move_cursor", "drag", "none", ""})
 
-    def _freeze_pointer_for_pinch(self, screen_x, screen_y, pinch_info):
-        """Hold the pointer where the fingers actually closed.
-
-        The pinch label needs about four frames to stabilise. Letting the pointer
-        keep following the hand through that window added measured drift that
-        grew with hand speed — 2 px at a slow pace, 20 px at 300 px/s, 40 px at
-        600 px/s — which then had to be absorbed by snapping, and the click still
-        landed away from where the pinch began. Freezing on the raw pinch frame
-        makes the pointer and the click agree exactly.
-        """
-        if pinch_info and pinch_info.get("is_pinching"):
-            if self._pinch_freeze_pos is None:
-                self._pinch_freeze_pos = (screen_x, screen_y)
-        else:
-            self._pinch_freeze_pos = None
-        return self._pinch_freeze_pos or (screen_x, screen_y)
+    _freeze_pointer_for_pinch = ControlEngine._freeze_pointer_for_pinch
 
     def _record_last_action(self, action):
         """Remember one executed action for the session card."""
@@ -2229,22 +1979,6 @@ class MainWindow(QMainWindow):
         y = (screen.height() - self.overlay.height()) // 2
         self.overlay.move(x, y)
 
-    def _init_ir_detector(self):
-        """初始化红外人体检测器"""
-        import platform
-
-        if platform.system() != "Windows":
-            return
-        from utils.camera_utils import detect_cameras, find_ir_camera, IRPresenceDetector
-
-        cameras = detect_cameras()
-        ir_cam_id = find_ir_camera(cameras)
-
-        if ir_cam_id is not None:
-            # 确保红外摄像头不是当前使用的RGB摄像头
-            rgb_cam_id = self.config.get("camera", "id")
-            if ir_cam_id != rgb_cam_id:
-                self.ir_detector = IRPresenceDetector(ir_cam_id)
 
     def toggle_running(self):
         """切换运行状态"""
@@ -2264,11 +1998,6 @@ class MainWindow(QMainWindow):
                 self._refresh_precision_console()
                 return
             self._start_after_camera_permission()
-            if self.ir_detector is None:
-                self._init_ir_detector()
-            # 启动红外检测器
-            if self.ir_detector:
-                self.ir_detector.start()
         else:
             self._status_override_key = ""
             self._hold_shortcut_error_key = ""
@@ -2277,9 +2006,6 @@ class MainWindow(QMainWindow):
                 self.action_coordinator.stop()
             else:
                 self._status_override_key = "main.control_unavailable"
-            # 停止红外检测器
-            if self.ir_detector:
-                self.ir_detector.stop()
             self._stop_hold_shortcut_monitor()
             self.video_label.clear()
             self.tracker.reset()
@@ -2292,7 +2018,6 @@ class MainWindow(QMainWindow):
             self.hud.hide_persistent()
             self.overlay.hide_feedback()
             self.power_mode = "normal"
-            self.no_hand_frames = 0
             # A stopping session has no "last action"; leaving the old one would
             # claim something happened that this session did not do.
             self._last_action_key = ""
@@ -2401,7 +2126,6 @@ class MainWindow(QMainWindow):
 
     def _update_hud_after_dispatch(self, action, result, anchor, is_locked=False, now=None):
         """Translate actual action results into feedback instead of raw gesture labels."""
-        import time
 
         now = time.monotonic() if now is None else now
         self.hud_anchor = anchor
@@ -2430,7 +2154,6 @@ class MainWindow(QMainWindow):
             self.hud.show_pointer(now)
 
     def _render_hud(self, timestamp=None):
-        import time
 
         if (self.is_running and getattr(self, "control_runtime", None) is None
                 and self.action_coordinator.input_guard.consume_interruption()):
@@ -2475,54 +2198,7 @@ class MainWindow(QMainWindow):
         )
         self.video_label.setPixmap(scaled)
 
-    def _update_power_mode(self, landmarks):
-        """更新节能模式 - 分层节能策略
 
-        The mode used to change only the status label while capture and inference
-        kept running at full rate, so the UI claimed to be saving power that it
-        was still spending. Each mode now also throttles the worker.
-        """
-        previous = self.power_mode
-        if landmarks:
-            # 检测到手，立即恢复正常模式
-            if self.power_mode != "normal":
-                self.power_mode = "normal"
-            self.no_hand_frames = 0
-            self._apply_power_throttle(previous)
-            return
-
-        self.no_hand_frames += 1
-
-        # 深度休眠模式：使用红外检测人体存在
-        if self.power_mode == "deep_sleep":
-            if self.ir_detector:
-                if self.ir_detector.detect_presence():
-                    # 红外检测到人，唤醒到休眠模式
-                    self.power_mode = "sleep"
-                    self.no_hand_frames = self.SLEEP_THRESHOLD + 1
-            return
-
-        # 进入低功耗模式
-        if self.no_hand_frames > self.LOW_THRESHOLD and self.power_mode == "normal":
-            self.power_mode = "low"
-        # 进入休眠模式
-        elif self.no_hand_frames > self.SLEEP_THRESHOLD and self.power_mode == "low":
-            self.power_mode = "sleep"
-        # 进入深度休眠模式（仅当有红外检测器时）
-        elif self.no_hand_frames > self.DEEP_SLEEP_THRESHOLD and self.power_mode == "sleep":
-            if self.ir_detector:
-                self.power_mode = "deep_sleep"
-        self._apply_power_throttle(previous)
-
-    def _apply_power_throttle(self, previous_mode):
-        """Push the current mode's frame interval to the capture worker."""
-        if self.power_mode == previous_mode:
-            return
-        worker = self.video_worker
-        setter = getattr(worker, "set_min_frame_interval", None)
-        if setter is None:
-            return
-        setter(self._POWER_FRAME_INTERVALS.get(self.power_mode, 0.0))
 
     def _set_preview_status_dot(self, semantic):
         """Colour the preview footer dot: live, tracking, or idle."""
@@ -2779,8 +2455,6 @@ class MainWindow(QMainWindow):
         self.hud_timer.stop()
         self.overlay.hide_feedback()
         self.overlay.close()
-        if self.ir_detector:
-            self.ir_detector.stop()
         self.action_coordinator.close()
         # Rows are committed every 32 writes or 2 seconds, so the tail of the
         # session is still buffered. Closing flushes it; without this the very

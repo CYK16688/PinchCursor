@@ -11,8 +11,8 @@ from types import SimpleNamespace
 import pytest
 from PySide6.QtWidgets import QApplication
 
+from capture.mediapipe_worker import LandmarkFrame
 from core.action_state_machine import ActionState
-from core.mediapipe_worker import LandmarkFrame
 from core.pointer_mapping import ScreenBounds
 from gui import main_window
 from platform_services.contracts import (

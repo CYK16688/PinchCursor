@@ -64,7 +64,6 @@ def test_session_gate_close_clears_partial_dynamic_observation():
         window.control_session.update = lambda **_kwargs: setattr(
             window.control_session, "state", SessionState.INACTIVE
         )
-        window._update_power_mode = lambda _landmarks, **_kwargs: None
         window.tracker.update = lambda _landmarks, _shape, **_kwargs: (None, False)
         window._check_edge_lost = lambda _landmarks, _now: None
         window.classifier.classify = lambda _landmarks, **_kwargs: "fist"
