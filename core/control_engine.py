@@ -22,6 +22,7 @@ from core.assist.target_model import Target, TargetModel
 from core.combo_detector import ComboDetector
 from core.contextual_intent import ContextualIntentController
 from core.control_session import ActivationMode, ControlSession, SessionState
+from core.dynamic_config import restore_dynamic_templates, restore_static_templates
 from core.dynamic_intent_lifecycle import DynamicIntentLifecycle, DynamicIntentState
 from core.gesture_classifier import GestureClassifier
 from core.hand_dynamics import HandDynamics
@@ -33,11 +34,11 @@ from core.pointer_gate import PointerJumpGate
 from core.pointer_mapping import AbsoluteMapper, RelativeMapper, ScreenBounds
 from core.pointer_projection import project
 from core.scroll_intent import ScrollIntentController
-from core.static_gesture_template import StaticGestureMatcher, StaticGestureTemplate
+from core.static_gesture_template import StaticGestureMatcher
 from core.transition_episodes import PinchEpisodeTracker
 from core.transition_model import TransitionModel
 from platform_services.contracts import ActionRequest, ActionResult
-from utils.dynamic_gesture_template import DynamicGestureMatcher, DynamicGestureTemplate
+from utils.dynamic_gesture_template import DynamicGestureMatcher
 from utils.settings import effective_assist
 from utils.settings import read as read_settings
 from utils.smoothing import (
@@ -549,66 +550,11 @@ class ControlEngine:
 
     def _restore_static_templates(self, template_dicts):
         """Convert valid persisted custom-trigger dictionaries into runtime templates."""
-        if not isinstance(template_dicts, list):
-            return {}
-
-        templates = {}
-        for template_dict in template_dicts:
-            if not isinstance(template_dict, dict):
-                continue
-            try:
-                feature_vector = tuple(template_dict["feature_vector"])
-                raw_threshold = template_dict.get("threshold", 0.18)
-            except (KeyError, TypeError):
-                continue
-            if (
-                len(feature_vector) != 63
-                or not isinstance(raw_threshold, Real)
-                or isinstance(raw_threshold, bool)
-                or not all(
-                    isinstance(value, Real) and not isinstance(value, bool) and isfinite(value)
-                    for value in feature_vector
-                )
-                or not isfinite(raw_threshold)
-                or raw_threshold <= 0
-            ):
-                continue
-            template = StaticGestureTemplate(
-                template_id=str(template_dict.get("template_id", "")),
-                name=str(template_dict.get("name", "")),
-                feature_vector=tuple(float(value) for value in feature_vector),
-                threshold=float(raw_threshold),
-            )
-            if template.template_id:
-                templates[template.template_id] = template
-        return templates
+        return restore_static_templates(template_dicts)
 
     def _restore_dynamic_templates(self, template_dicts):
         """Convert persisted, normalized dynamic shortcut records into runtime templates."""
-        templates = []
-        if not isinstance(template_dicts, list):
-            return templates
-        for item in template_dicts:
-            if not isinstance(item, dict):
-                continue
-            try:
-                samples = tuple(
-                    tuple(tuple(frame) for frame in sample)
-                    for sample in item["samples"]
-                )
-                templates.append(DynamicGestureTemplate(
-                    template_id=item["template_id"],
-                    name=item["name"],
-                    action=item["action"],
-                    samples=samples,
-                    threshold=item["threshold"],
-                    cooldown_seconds=item["cooldown_seconds"],
-                    min_motion_energy=item["min_motion_energy"],
-                    context_category=str(item.get("context_category", "")),
-                ))
-            except (KeyError, TypeError, ValueError):
-                continue
-        return templates
+        return restore_dynamic_templates(template_dicts)
 
     def _clear_dynamic_shortcut_observation(self):
         """Discard partial motion when its continuous hand tracking breaks."""
