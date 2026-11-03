@@ -19,7 +19,7 @@ env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
 ```
 Read the summary line, not only the exit code: the suite ends the process early
 on purpose, so a run is green only when it reports every collected test passing.
-The current baseline is 1472 passed.
+The current baseline is 1479 passed.
 
 Also required:
 
