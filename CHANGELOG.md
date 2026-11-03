@@ -46,6 +46,9 @@ useful during review.
   lives in `core/dynamic_config.py`. The control engine and the main window both
   call it, so the window no longer borrows the engine's private restore methods;
   its own constructor restores shortcuts directly.
+- The window no longer declares `= ControlEngine._x` aliases. The three it
+  kept (snap provider, candidate recorder, observation reset) are called on
+  the window explicitly, bound to the real engine class captured at import.
 - Documentation: `docs/DEVELOPMENT.md` gained a static-checks section, and
   `docs/CONTROL_ARCHITECTURE.md` records the new module boundaries.
 
@@ -62,7 +65,7 @@ useful during review.
 - A corrupted batch of words in the README (`mailbox`, `context`, `text`,
   `index`, `experimental`, `explicitly` and `requirements.txt` had letters
   replaced) is repaired.
-- The recorded test count matches the suite again (1479 passing).
+- The recorded test count matches the suite again (1476 passing).
 
 ## 0.2.0 — 2026-10-29
 
