@@ -13,7 +13,7 @@
 <p align="center">
   <img alt="platform" src="https://img.shields.io/badge/platform-macOS%2015%2B-111111">
   <img alt="python" src="https://img.shields.io/badge/python-3.13-3776AB">
-  <img alt="tests" src="https://img.shields.io/badge/tests-1433%20passing-47D7A1">
+  <img alt="tests" src="https://img.shields.io/badge/tests-1471%20passing-47D7A1">
   <img alt="license" src="https://img.shields.io/badge/license-AGPL--3.0-5E8CFF">
   <img alt="telemetry" src="https://img.shields.io/badge/telemetry-off%20by%20default-8B93A1">
 </p>
@@ -135,7 +135,7 @@ open "dist/PinchCursor.app"
 
 ```bash
 env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
-# 1433 passed
+# 1471 passed
 ```
 
 合成关键点回放覆盖点击、双击、拖动、释放、滚动、丢手、过期帧、摄像头几何变化、精细控制以及 15/30/60 FPS 链路。原生输入使用假 OS 接收端。真实摄像头准确度、实体鼠标等价性、实际拔插恢复和长时间舒适度仍需设备验收，详见[验证文档](docs/VALIDATION.md)。

@@ -5,14 +5,14 @@
 Run with the project environment (Python 3.13 + PySide6 6.12):
 
 ```bash
-env -u PYTHONPATH .venv/bin/python -m compileall -q core gui platform_services utils main.py tests
+env -u PYTHONPATH .venv/bin/python -m compileall -q core capture gui platform_services utils scripts/lint_changed.py main.py tests
 env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
 ```
 
-Latest automated result (2026-10-30, exit code checked):
+Latest automated result (2026-11-03, exit code checked):
 
 ```text
-1433 passed in 141.43s
+1471 passed in 122.03s
 compileall passed
 exit code 0
 ```
@@ -75,6 +75,7 @@ MediaPipe inference on an empty image; it does not measure gesture accuracy.
 | Physical intent and recovery | One-frame closure, incomplete approach, fist transitions, missing/stale/gapped observations and incoherent palm jumps emit no click and permit a fresh deliberate click after genuine opening. Curl-only long holds do not drag or become clicks; whole-hand translation drags and releases once. Consecutive pinches rearm at 15/30/60 FPS. |
 | Reconstruction boundaries | Camera dimension changes during a candidate or drag discard the episode and release exactly the owed button; absent trusted filter history reports cancellation. Both absolute and relative paths recover after opening. Numeric filter copies preserve bound clock services, including owners with locks. |
 | Physical timing and FSM authority | Observer/FSM tests distinguish physical closure from confidence dwell, keep original opening time through release debounce, snap targets once, and prevent cancelled candidates or late labels from re-admitting a click. Zone filtering and native release remain enforced. |
+| Position rejection and pinch endings | `test_pointer_gate_pipeline.py` replays default-threshold, in-frame fingertip outliers at 15/30/60 FPS in absolute/relative modes. Qualified release still clicks the existing target, and release/cancellation ends a native drag on the same observation. Missing trusted state/target/mapping cannot produce a click. Rejected frames cannot admit candidates, start drags or trigger optional commands; ordinary outlier movement remains blocked. These are synthetic detector errors, not measured camera trajectories. |
 | Continuous scrolling | Core scroll replays run at 15/30/60 FPS without an AX provider: stable pointing arms, thumb direction confirms, wheel ticks repeat at a bounded rate and raw pose exit stops immediately. Separate contextual-only tests retain target-identity invalidation. |
 | Release recovery | `macos/test_release_recovery.py` and `test_input_guard.py` cover failed mouse-up, partially delivered clicks, repeated recovery, and retry while fresh frames continue. No new press is allowed while release remains pending. |
 | Camera stalls and UI stalls | `test_input_guard.py` verifies a separate watchdog releases without another Qt callback, and rejects dispatch after a slow context lookup. A 250 ms frame lease with nominal 25 ms watchdog polling is a software timeout policy, not a hard real-time or OS-delivery guarantee. |
@@ -85,6 +86,13 @@ MediaPipe inference on an empty image; it does not measure gesture accuracy.
 | Native-call stalls | Stuck native down/up test doubles cannot block the GUI-side runtime stop. Input is revoked immediately; the serialized release finishes only after the stalled native call returns. |
 | Auxiliary freshness and bounds | `test_async_services.py` checks bounded request/write queues, request-start cache age, spatial validity, invalidation generations, policy-disabled behavior, and deferred store disposal. |
 | Native cursor reanchor | Fake Quartz and Win32 cursor readers retain fractional/negative coordinates and reject malformed positions; relative mapping does not read QCursor from the control thread. |
+
+`test_lint_changed.py` uses temporary Git histories to verify complete push/PR
+lint ranges, new branches, first pushes, force-push recovery, deleted/renamed
+paths and filenames containing spaces or shell metacharacters. The pre-commit
+configuration and isolated pinned-Ruff hook were also run locally, including a
+temporary repository containing a file with formatting-only differences. This
+does not establish a successful remote GitHub Actions run.
 
 Manual acceptance remains required for actual camera lighting/distance, left and
 right hands, small controls, Finder/text selection, drag-and-drop, scrolling,

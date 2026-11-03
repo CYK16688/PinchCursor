@@ -19,12 +19,15 @@ env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
 ```
 Read the summary line, not only the exit code: the suite ends the process early
 on purpose, so a run is green only when it reports every collected test passing.
-The current baseline is 1433 passed.
+The current baseline is 1471 passed.
 
 Also required:
 
-- `ruff check` on the files you touched reports nothing new. The CI lint job is
-  scoped to changed files, and a pre-commit hook runs the same check.
+- Ruff 0.17.3 reports no findings in changed Python files. CI covers every commit
+  in a push, or changes since the pull request's common ancestor. The pre-commit
+  hook installs the same pinned version in an isolated environment and checks
+  staged files; see the development guide to install it. Formatting is an
+  optional review step, not a commit or CI gate while existing differences remain.
 - the type-check configuration under `tool.mypy` does not gain findings.
 
 ## Layering contract

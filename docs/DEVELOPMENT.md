@@ -126,17 +126,34 @@ tracked; `build/`, `dist/` and Python caches are disposable local output.
 The test suite is the blocking gate. These checks cover what tests cannot see,
 and the CI workflow runs them as a separate job.
 
-That job does not fail on the repository's existing findings: it lints the
-Python files a push or pull request actually touches. Existing debt is 202 ruff
-findings and 57 type errors in `core/`, recorded here so it can be burnt down
-instead of hidden behind a flag that never fails. Shrink this list as files are
-cleaned; remove the ignore list once the tree is clean.
+The lint job installs `ruff==0.17.3` and checks Python files across the entire
+push (`before..after`) or pull request (the base/head common ancestor through
+the PR head). Deleted paths are excluded and renamed paths use their new names.
+When a new branch has no previous SHA, it uses the default branch's common
+ancestor; the first repository push checks every tracked Python file. Existing
+findings in untouched files are outside this gate.
+If a force push leaves the previous commit outside fetched history, the script
+fetches that exact SHA. An unavailable baseline fails the check instead of
+silently checking a smaller range.
 
-Run them locally from the project root:
+Install the local hook from the project root:
 
-- `ruff check .` - lint
-- `ruff format --check .` - formatting
-- the type check configured under `tool.mypy` - currently scoped to `core/`
+```bash
+uv pip install --python .venv/bin/python 'pre-commit==4.7.0'
+.venv/bin/python -m pre_commit install
+```
 
-A hook configuration in the repository root runs the same lint on the files you
-stage, so a commit cannot introduce a new finding.
+The hook creates its own Python environment with the same pinned Ruff version,
+so it does not depend on a globally installed `ruff`. It checks staged Python
+files; CI checks the complete event range. Neither gate requires formatting:
+the tree has existing formatting differences, which are handled separately from
+behaviour changes. To review formatting or whole-tree lint voluntarily:
+
+```bash
+uv pip install --python .venv/bin/python 'ruff==0.17.3'
+.venv/bin/python -m ruff check .
+.venv/bin/python -m ruff format --check .
+```
+
+Static type checking under `tool.mypy` remains scoped to `core/` and is not a
+blocking CI job.

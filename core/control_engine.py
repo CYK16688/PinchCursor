@@ -1052,11 +1052,14 @@ class ControlEngine:
             self.last_executed_gesture = self.last_executed_action = "none"
         h, w = frame_shape[:2]
         self._last_frame_size = (w, h)
-        if not self.jump_gate.accept(pos, (w, h), now):
-            # One implausible sample is not evidence that the hand moved. Holding
-            # this frame keeps a false detection from teleporting the pointer; a
-            # genuinely new place is adopted on the next agreeing sample.
-            return tuple(self._outcomes[initial:])
+        position_accepted = self.jump_gate.accept(pos, (w, h), now)
+        if not position_accepted:
+            # Reject movement, not an independently qualified ending. Dropping
+            # released here loses its one-shot evidence on the next idle frame;
+            # dropping cancelled can leave a native drag down with a fresh lease.
+            if joint_evidence is None or joint_evidence.phase not in {"released", "cancelled"}:
+                return tuple(self._outcomes[initial:])
+            intent_decision = IntentDecision(IntentOwner.POINTER, "point", True, False, False)
         raw = getattr(self.classifier, "last_raw_gesture", gesture)
         joint_owns = joint_evidence is not None and joint_evidence.owns_pointer
         scroll_pose = not joint_owns and (
@@ -1069,10 +1072,16 @@ class ControlEngine:
         # The visible branch keeps its uninterrupted raw pointing history.
         # Candidate admission may reconstruct a target, but cannot install that
         # older filter state into this branch or lock the native cursor.
-        mapped = self._map_pointer(pos, (w, h))
+        mapped = self._map_pointer(pos, (w, h)) if position_accepted else None
         joint_motion = None
         if joint_owns and joint_evidence.phase in {"candidate", "confirmed", "released"}:
-            joint_motion = self._advance_pinch_pointer(joint_evidence, frame_shape, now)
+            if not position_accepted and (
+                    self._joint_pointer_state is None or self._joint_target is None):
+                # A rejected position cannot establish a new clean branch or
+                # target. Without the already trusted branch, cancel safely.
+                self._joint_mapping_failed = True
+            else:
+                joint_motion = self._advance_pinch_pointer(joint_evidence, frame_shape, now)
         elif joint_evidence is not None and joint_evidence.phase == "cancelled":
             self._joint_pointer_state = None
         if mapped is None:
@@ -1118,7 +1127,7 @@ class ControlEngine:
         # Warm the bounded broker while pointing. A lock transition then scores
         # its fresh cached targets without starting a native lookup inline.
         probe = getattr(self.platform_services.context_provider, "probe_targets", None)
-        if self.target_model is not None and probe is not None:
+        if position_accepted and self.target_model is not None and probe is not None:
             try:
                 radius = int(max(24.0, min(60.0, self.target_model.max_snap_distance)))
                 probe_pos = (self._joint_target if joint_owns and not self._joint_mapping_failed
@@ -1189,7 +1198,8 @@ class ControlEngine:
             dispatch_gesture = gesture
         context, target_id = None, ""
         context_cfg = self.config.get("context_aware") or {}
-        if ((allow_contextual or (gesture == "point" and self.action_machine.state is ActionState.MOVING))
+        if (position_accepted
+                and (allow_contextual or (gesture == "point" and self.action_machine.state is ActionState.MOVING))
                 and not self.pointer_scroll_enabled
                 and target_detected and context_cfg.get("enabled", True)
                 and context_cfg.get("intent_actions_enabled", True)):

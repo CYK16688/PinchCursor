@@ -34,20 +34,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
       - name: Install lint tools
         run: python -m pip install ruff==0.17.3
       - name: Lint changed Python files
-        run: |
-          files=""
-          if git show -s HEAD~1 > /dev/null 2>&1; then
-            files=$(git diff --name-only HEAD~1 HEAD -- '*.py')
-          fi
-          if [ -z "$files" ]; then
-            echo "no changed python files"
-            exit 0
-          fi
-          echo "$files"
-          ruff check $files
+        run: python scripts/lint_changed.py

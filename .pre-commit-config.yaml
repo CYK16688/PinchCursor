@@ -3,11 +3,7 @@ repos:
     hooks:
       - id: ruff-check
         name: ruff check
-        entry: ruff check
-        language: system
-        types: [python]
-      - id: ruff-format-check
-        name: ruff format --check
-        entry: ruff format --check
-        language: system
+        entry: python -m ruff check --
+        language: python
+        additional_dependencies: [ruff==0.17.3]
         types: [python]

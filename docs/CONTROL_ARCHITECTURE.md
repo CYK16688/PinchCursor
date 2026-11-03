@@ -90,6 +90,13 @@ with it, so a real reacquisition costs a frame instead of a frozen cursor. The
 gate is per-session state, reset with the rest of the pointer lane, and can be
 disabled with `pointer_stability.enabled = false`.
 
+Position rejection never suppresses an independently qualified pinch ending.
+`released` still passes through the existing state machine's timing and target
+checks using the previously trusted palm-motion branch; missing history, target
+or mapping cancels safely. `cancelled` releases an active drag on that same
+observation. A rejected position cannot admit a candidate, start a drag, become
+a new target or trigger an optional command.
+
 ### Joint pinch admission and aim
 
 `PinchIntentObserver` owns one physical episode. It first requires genuine open
