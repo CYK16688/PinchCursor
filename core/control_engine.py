@@ -24,7 +24,6 @@ from core.contextual_intent import ContextualIntentController
 from core.control_session import ActivationMode, ControlSession, SessionState
 from core.dynamic_config import (
     plan_dynamic_shortcuts,
-    restore_dynamic_templates,
     restore_static_templates,
 )
 from core.dynamic_intent_lifecycle import DynamicIntentState
@@ -553,10 +552,6 @@ class ControlEngine:
     def _restore_static_templates(self, template_dicts):
         """Convert valid persisted custom-trigger dictionaries into runtime templates."""
         return restore_static_templates(template_dicts)
-
-    def _restore_dynamic_templates(self, template_dicts):
-        """Convert persisted, normalized dynamic shortcut records into runtime templates."""
-        return restore_dynamic_templates(template_dicts)
 
     def _clear_dynamic_shortcut_observation(self):
         """Discard partial motion when its continuous hand tracking breaks."""

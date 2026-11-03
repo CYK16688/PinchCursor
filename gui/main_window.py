@@ -781,11 +781,6 @@ class MainWindow(QMainWindow):
             self.intent_arbiter.mark_shortcut_committed()
         return result.executed
 
-    def dispatch_recorded_dynamic_shortcut(self, anchor, *, now):
-        """Deprecated compatibility entry point; raw recordings never dispatch."""
-        del anchor, now
-        return False
-
     def observe_recorded_dynamic_shortcut(self, landmarks, anchor, *, now):
         """Deprecated compatibility entry point; dynamic frames need a lifecycle boundary."""
         del landmarks, anchor, now
