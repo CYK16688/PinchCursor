@@ -38,10 +38,13 @@ useful during review.
   no Qt import at all, and `utils/` no longer imports `core/`.
 - `utils/dynamic_gesture_template.py` moved out of `core/`, which removed the
   reverse `utils -> core` dependency that made the old layering claim false.
-- Pointer-mapping configuration reads share `utils/settings.py`, removing the
-  conflicting fallback gain values. Effective assist values and the pointer
-  plausibility gate also share one reader; other configuration sections still
-  have direct readers.
+- Every section the typed snapshot models now reads through `utils/settings.py`:
+  pointer mapping, assist, sensitivity, stabilization, scroll and stability.
+  That removes the duplicated default literals (the mapping gain, the scroll
+  timings, the dead zone) and makes an unusable value fall back to the
+  documented default. Sections the snapshot does not model yet (gestures,
+  performance, sessions, zones, temporal, dynamic shortcuts) still read their
+  own mappings directly.
 - The conversion of recorded static and dynamic shortcuts into runtime templates
   lives in `core/dynamic_config.py`. The control engine and the main window both
   call it, so the window no longer borrows the engine's private restore methods;
