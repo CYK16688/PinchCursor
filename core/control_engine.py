@@ -46,7 +46,6 @@ from utils.settings import effective_assist
 from utils.settings import read as read_settings
 from utils.smoothing import (
     CURSOR_SMOOTHING_BETA,
-    DEFAULT_DEAD_ZONE,
     CursorSmoother,
     mincutoff_for_smoothing,
 )
@@ -176,12 +175,12 @@ class ControlEngine:
 
     def _configure_pointer(self):
         self.preset = preset_for((self.config.get("performance") or {}).get("mode"))
-        sensitivity = self.config.get("global_sensitivity") or {}
+        sensitivity = read_settings(self.config).sensitivity
         self.smoother = CursorSmoother(
-            mincutoff=mincutoff_for_smoothing(sensitivity.get("smoothing"),
+            mincutoff=mincutoff_for_smoothing(sensitivity.smoothing,
                                            default=self.preset.smoothing_mincutoff),
             beta=CURSOR_SMOOTHING_BETA,
-            dead_zone=sensitivity.get("dead_zone", DEFAULT_DEAD_ZONE),
+            dead_zone=sensitivity.dead_zone,
             clock=self.clock,
         )
         calibration = self.config.get("pinch_calibration") or {}
