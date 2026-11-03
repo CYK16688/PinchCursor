@@ -133,12 +133,12 @@ class ControlEngine:
         self._joint_landmarks = None
         self._current_motion_pos = None
         self.contextual_intent_controller = ContextualIntentController()
-        scroll = self.config.get("pointer_scroll") or {}
-        self.pointer_scroll_enabled = scroll.get("enabled", True) is True
+        scroll = read_settings(self.config).scroll
+        self.pointer_scroll_enabled = scroll.enabled
         self.scroll_intent_controller = ScrollIntentController(
-            dwell_seconds=scroll.get("dwell_seconds", 0.3),
-            repeat_seconds=scroll.get("repeat_seconds", 0.12),
-            enter_seconds=scroll.get("enter_seconds", 0.08),
+            dwell_seconds=scroll.dwell_seconds,
+            repeat_seconds=scroll.repeat_seconds,
+            enter_seconds=scroll.enter_seconds,
         )
         self.combo_detector = ComboDetector(clock=clock)
         self.combo_detector.set_combos(self.config.get("gesture_combos") or [])
