@@ -36,3 +36,17 @@ def test_configured_values_are_read_back():
     assert snapshot.scroll.enabled is False
     assert snapshot.scroll.repeat_seconds == 0.2
     assert snapshot.stability.enabled is False
+
+
+def test_an_unusable_gate_flag_cannot_switch_the_gate_off():
+    """Only a real bool counts; malformed input keeps the gate at its default.
+
+    The control engine builds its pointer plausibility gate from this value, so
+    a string or a number written by hand must not silently disable the check
+    that stops one bad sample from teleporting the cursor.
+    """
+    for value in ("yes", 1, 0.0, None, []):
+        snapshot = read({"pointer_stability": {"enabled": value}})
+        assert snapshot.stability.enabled is True
+    assert read({"pointer_stability": {}}).stability.enabled is True
+    assert read({"pointer_stability": {"enabled": False}}).stability.enabled is False

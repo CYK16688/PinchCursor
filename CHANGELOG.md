@@ -39,8 +39,9 @@ useful during review.
 - `utils/dynamic_gesture_template.py` moved out of `core/`, which removed the
   reverse `utils -> core` dependency that made the old layering claim false.
 - Pointer-mapping configuration reads share `utils/settings.py`, removing the
-  conflicting fallback gain values. Effective assist values also share one
-  reader; other configuration sections still have direct readers.
+  conflicting fallback gain values. Effective assist values and the pointer
+  plausibility gate also share one reader; other configuration sections still
+  have direct readers.
 - Documentation: `docs/DEVELOPMENT.md` gained a static-checks section, and
   `docs/CONTROL_ARCHITECTURE.md` records the new module boundaries.
 
@@ -57,7 +58,7 @@ useful during review.
 - A corrupted batch of words in the README (`mailbox`, `context`, `text`,
   `index`, `experimental`, `explicitly` and `requirements.txt` had letters
   replaced) is repaired.
-- The recorded test count matches the suite again (1471 passing).
+- The recorded test count matches the suite again (1472 passing).
 
 ## 0.2.0 — 2026-10-29
 

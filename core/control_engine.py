@@ -139,12 +139,12 @@ class ControlEngine:
         self.combo_detector = ComboDetector(clock=clock)
         self.combo_detector.set_combos(self.config.get("gesture_combos") or [])
         self.pinch_episodes = PinchEpisodeTracker(clock=clock)
-        stability = self.config.get("pointer_stability") or {}
+        stability = read_settings(self.config).stability
         # The pointer lane maps a fingertip straight onto the screen, so it needs
         # its own plausibility check; the pinch lane's palm-coherence gate cannot
         # help a position that follows the fingertip across the frame.
         self.jump_gate = PointerJumpGate(
-            enabled=stability.get("enabled", True) is True,
+            enabled=stability.enabled,
         )
         self.transition_model = None
         self._last_frame_time = float("-inf")
