@@ -68,3 +68,34 @@ def test_context_and_temporal_defaults():
     assert snapshot.context_aware.intent_actions_enabled is True
     assert snapshot.temporal.transition_guard is True
     assert snapshot.temporal.transition_model == ""
+
+
+def test_action_mode_and_performance_read_back():
+    snapshot = read({
+        "action_mode": {"dwell_threshold": 0.5, "move_threshold": 12, "drag_threshold": 0.4},
+        "performance": {"mode": "performance"},
+    })
+    assert snapshot.action_mode.dwell_threshold == 0.5
+    assert snapshot.action_mode.move_threshold == 12.0
+    assert snapshot.action_mode.drag_threshold == 0.4
+    assert snapshot.performance.mode == "performance"
+
+
+def test_action_mode_and_performance_defaults():
+    snapshot = read({})
+    assert snapshot.action_mode.dwell_threshold == 0.3
+    assert snapshot.action_mode.move_threshold == 8.0
+    assert snapshot.action_mode.drag_threshold == 0.3
+    assert snapshot.performance.mode == "standard"
+
+
+def test_pinch_calibration_reads_only_a_usable_window():
+    from utils.settings import read_pinch_calibration
+
+    assert read_pinch_calibration({}) is None
+    assert read_pinch_calibration({"pinch_calibration": {}}) is None
+    assert read_pinch_calibration({"pinch_calibration": {"enter_ratio": 0.4}}) is None
+    assert read_pinch_calibration({"pinch_calibration": {"enter_ratio": "x", "exit_ratio": 0.5}}) is None
+    assert read_pinch_calibration({"pinch_calibration": {"enter_ratio": 0.4, "exit_ratio": 0.0}}) is None
+    usable = read_pinch_calibration({"pinch_calibration": {"enter_ratio": 0.4, "exit_ratio": 0.55}})
+    assert usable is not None and usable.exit_ratio == 0.55

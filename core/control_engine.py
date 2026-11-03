@@ -41,7 +41,7 @@ from core.static_gesture_template import StaticGestureMatcher
 from core.transition_episodes import PinchEpisodeTracker
 from core.transition_model import TransitionModel
 from platform_services.contracts import ActionRequest, ActionResult
-from utils.settings import effective_assist
+from utils.settings import effective_assist, read_pinch_calibration
 from utils.settings import read as read_settings
 from utils.smoothing import (
     CURSOR_SMOOTHING_BETA,
@@ -173,8 +173,8 @@ class ControlEngine:
         return record.get("action", "none") if record.get("enabled", True) else "none"
 
     def _configure_pointer(self):
-        self.preset = preset_for((self.config.get("performance") or {}).get("mode"))
         settings_view = read_settings(self.config)
+        self.preset = preset_for(settings_view.performance.mode)
         sensitivity = settings_view.sensitivity
         self.scroll_speed = sensitivity.scroll_speed
         self.smoother = CursorSmoother(
@@ -184,12 +184,10 @@ class ControlEngine:
             dead_zone=sensitivity.dead_zone,
             clock=self.clock,
         )
-        calibration = self.config.get("pinch_calibration") or {}
-        try:
-            self.classifier.set_pinch_calibration(
-                float(calibration["enter_ratio"]), float(calibration["exit_ratio"])
-            )
-        except (KeyError, TypeError, ValueError):
+        calibration = read_pinch_calibration(self.config)
+        if calibration is not None:
+            self.classifier.set_pinch_calibration(calibration.enter_ratio, calibration.exit_ratio)
+        else:
             self.classifier.pinch_threshold = self._get_gesture("pinch").get("threshold", 35)
         self.classifier.hold_threshold = self._get_gesture("pinch_hold").get("hold_time", 0.3)
         stabilization = read_settings(self.config).stabilization
@@ -198,10 +196,9 @@ class ControlEngine:
             setattr(self.classifier, key, getattr(stabilization, key))
         self.hand_dynamics = HandDynamics(enter_ratio=self.classifier.pinch_enter_ratio,
                                           exit_ratio=self.classifier.pinch_exit_ratio)
-        action = self.config.get("action_mode") or {}
-        for key, default in (("dwell_threshold", 0.3), ("move_threshold", 8),
-                             ("drag_threshold", 0.3)):
-            setattr(self.action_machine, key, action.get(key, default))
+        action = read_settings(self.config).action_mode
+        for key in ("dwell_threshold", "move_threshold", "drag_threshold"):
+            setattr(self.action_machine, key, getattr(action, key))
         self.action_machine.set_zone_rules(self.config.get("zone_rules") or [])
         mapping = read_settings(self.config).mapping
         try:

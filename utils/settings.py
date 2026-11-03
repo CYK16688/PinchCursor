@@ -131,6 +131,30 @@ class Temporal:
 
 
 @dataclass(frozen=True)
+class PinchCalibration:
+    """A learned pinch closure window, when one has been recorded."""
+
+    enter_ratio: float
+    exit_ratio: float
+
+
+@dataclass(frozen=True)
+class ActionMode:
+    """Thresholds for the click/drag action state machine."""
+
+    dwell_threshold: float
+    move_threshold: float
+    drag_threshold: float
+
+
+@dataclass(frozen=True)
+class Performance:
+    """The performance preset name."""
+
+    mode: str
+
+
+@dataclass(frozen=True)
 class SettingsSnapshot:
     """One validated read of the settings, safe to hold across frames."""
 
@@ -142,6 +166,8 @@ class SettingsSnapshot:
     stability: PointerStability
     context_aware: ContextAware
     temporal: Temporal
+    action_mode: ActionMode
+    performance: Performance
 
 
 def read(config, defaults=None):
@@ -222,6 +248,18 @@ def read(config, defaults=None):
         transition_model=text(values, "transition_model", ""),
     )
 
+    values = section(config, "action_mode")
+    bases = section(base, "action_mode")
+    action_mode = ActionMode(
+        dwell_threshold=number(values, "dwell_threshold", number(bases, "dwell_threshold", 0.3)),
+        move_threshold=number(values, "move_threshold", number(bases, "move_threshold", 8)),
+        drag_threshold=number(values, "drag_threshold", number(bases, "drag_threshold", 0.3)),
+    )
+
+    values = section(config, "performance")
+    bases = section(base, "performance")
+    performance = Performance(mode=text(values, "mode", text(bases, "mode", "standard")))
+
     return SettingsSnapshot(
         mapping=mapping,
         assist=assist,
@@ -231,7 +269,28 @@ def read(config, defaults=None):
         stability=stability,
         context_aware=context_aware,
         temporal=temporal,
+        action_mode=action_mode,
+        performance=performance,
     )
+
+def read_pinch_calibration(config):
+    """Return the learned closure window, or None when there is a usable one.
+
+    A saved calibration can be missing (the user never ran it) or malformed (an
+    old file). Both mean "not calibrated", so the caller falls back to the
+    gesture threshold; that decision lives here rather than in a try/except at
+    the call site.
+    """
+    values = section(config, "pinch_calibration")
+    enter = values.get("enter_ratio")
+    exit_ = values.get("exit_ratio")
+    for value in (enter, exit_):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        if not math.isfinite(float(value)) or float(value) <= 0.0:
+            return None
+    return PinchCalibration(enter_ratio=float(enter), exit_ratio=float(exit_))
+
 
 def effective_assist(assist):
     """The snap distance and confidence actually in force for the assist.
