@@ -7,6 +7,7 @@ import traceback
 from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass, replace
+from functools import partial
 from math import isfinite
 from numbers import Real
 
@@ -80,6 +81,11 @@ from utils.smoothing import (
     mincutoff_for_smoothing,
 )
 from utils.tracker import TargetTracker
+
+# The true class, captured at import time: tests replace the module
+# attribute ``ControlEngine`` with a factory, but window internals still need
+# the real class for a few shared operations.
+_RealEngine = ControlEngine
 
 # A capture backend can block in read(). Keep its QThread alive until it exits,
 # even when the owning window closes; deleting a running QThread aborts Qt.
@@ -588,7 +594,7 @@ class MainWindow(QMainWindow):
             # A missing or invalid model must not silently disable clicking;
             # fall back to the deterministic policy.
             self.assist_mode = "bayesian"
-        self.action_machine.snap_provider = self._snap_cursor_position
+        self.action_machine.snap_provider = partial(_RealEngine._snap_cursor_position, self)
 
 
     def _apply_adaptive_tuning(self):
@@ -689,9 +695,7 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001 - a bad model file is not a startup failure
             self.transition_model = None
 
-    _snap_cursor_position = ControlEngine._snap_cursor_position
 
-    _record_candidates = ControlEngine._record_candidates
 
 
     def _refresh_control_session_from_config(self, session_cfg=None):
@@ -722,7 +726,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_dynamic_shortcuts_from_config(self):
         """Restore saved motion shortcuts into this window's own runtime state."""
-        self._clear_dynamic_shortcut_observation()
+        _RealEngine._clear_dynamic_shortcut_observation(self)
         plan = plan_dynamic_shortcuts(self.config.get("dynamic_gestures") or {})
         self.dynamic_intent_lifecycle = plan.lifecycle
         self.dynamic_landmark_frames = deque(
@@ -825,7 +829,6 @@ class MainWindow(QMainWindow):
         self.dynamic_landmark_frames.clear()
         return observation, matched
 
-    _clear_dynamic_shortcut_observation = ControlEngine._clear_dynamic_shortcut_observation
 
     def _reset_gesture_observation_state(self):
         """Clear optional command candidates at a safety boundary."""
@@ -833,7 +836,7 @@ class MainWindow(QMainWindow):
         if replay_engine is not None:
             ControlEngine._reset_gesture_observation_state(replay_engine)
         self.contextual_intent_controller.reset()
-        self._clear_dynamic_shortcut_observation()
+        _RealEngine._clear_dynamic_shortcut_observation(self)
         combo_detector = getattr(self, "combo_detector", None)
         if combo_detector is not None:
             combo_detector.reset()
