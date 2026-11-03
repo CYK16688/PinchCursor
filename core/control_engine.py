@@ -22,8 +22,12 @@ from core.assist.target_model import Target, TargetModel
 from core.combo_detector import ComboDetector
 from core.contextual_intent import ContextualIntentController
 from core.control_session import ActivationMode, ControlSession, SessionState
-from core.dynamic_config import restore_dynamic_templates, restore_static_templates
-from core.dynamic_intent_lifecycle import DynamicIntentLifecycle, DynamicIntentState
+from core.dynamic_config import (
+    plan_dynamic_shortcuts,
+    restore_dynamic_templates,
+    restore_static_templates,
+)
+from core.dynamic_intent_lifecycle import DynamicIntentState
 from core.gesture_classifier import GestureClassifier
 from core.hand_dynamics import HandDynamics
 from core.input_guard import frame_is_fresh
@@ -38,7 +42,6 @@ from core.static_gesture_template import StaticGestureMatcher
 from core.transition_episodes import PinchEpisodeTracker
 from core.transition_model import TransitionModel
 from platform_services.contracts import ActionRequest, ActionResult
-from utils.dynamic_gesture_template import DynamicGestureMatcher
 from utils.settings import effective_assist
 from utils.settings import read as read_settings
 from utils.smoothing import (
@@ -647,25 +650,13 @@ class ControlEngine:
     def _refresh_dynamic_shortcuts_from_config(self):
         """Restore user-recorded motion shortcuts after a successful Settings save."""
         self._clear_dynamic_shortcut_observation()
-        dynamic = self.config.get("dynamic_gestures") or {}
-        defaults = dynamic.get("defaults") or {}
-        self.dynamic_intent_lifecycle = DynamicIntentLifecycle(
-            neutral_rearm_frames=defaults.get("neutral_rearm_frames", 3),
-            end_neutral_frames=defaults.get("end_neutral_frames", 2),
-            max_recording_frames=defaults.get("max_recording_frames", 180),
-            max_duration_seconds=defaults.get("max_duration_seconds", 3.0),
-        )
+        plan = plan_dynamic_shortcuts(self.config.get("dynamic_gestures") or {})
+        self.dynamic_intent_lifecycle = plan.lifecycle
         self.dynamic_landmark_frames = deque(
             maxlen=self.dynamic_intent_lifecycle.max_recording_frames
         )
-        self.dynamic_templates = []
-        self.dynamic_runtime_matcher = None
-        if not dynamic.get("enabled", True):
-            return
-        self.dynamic_templates = self._restore_dynamic_templates(dynamic.get("templates") or [])
-        if self.dynamic_templates:
-            matcher = DynamicGestureMatcher()
-            self.dynamic_runtime_matcher = matcher.create_runtime_matcher(self.dynamic_templates)
+        self.dynamic_templates = plan.templates
+        self.dynamic_runtime_matcher = plan.matcher
 
     def _refresh_pointer_assist(self):
         """Rebuild the aiming assist and attach it to the lock transition.

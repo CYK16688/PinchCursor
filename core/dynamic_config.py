@@ -11,11 +11,13 @@ call it with a plain dict.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from math import isfinite
 from numbers import Real
 
+from core.dynamic_intent_lifecycle import DynamicIntentLifecycle
 from core.static_gesture_template import StaticGestureTemplate
-from utils.dynamic_gesture_template import DynamicGestureTemplate
+from utils.dynamic_gesture_template import DynamicGestureMatcher, DynamicGestureTemplate
 
 
 def restore_static_templates(template_dicts):
@@ -81,3 +83,31 @@ def restore_dynamic_templates(template_dicts):
         except (KeyError, TypeError, ValueError):
             continue
     return templates
+
+
+@dataclass(frozen=True)
+class PlannedShortcuts:
+    """The runtime objects a dynamic-shortcut section implies."""
+
+    lifecycle: DynamicIntentLifecycle
+    templates: list
+    matcher: object | None
+
+
+def plan_dynamic_shortcuts(section):
+    """Build the lifecycle, templates and matcher a saved section implies."""
+    dynamic = section if isinstance(section, dict) else {}
+    defaults = dynamic.get("defaults") or {}
+    lifecycle = DynamicIntentLifecycle(
+        neutral_rearm_frames=defaults.get("neutral_rearm_frames", 3),
+        end_neutral_frames=defaults.get("end_neutral_frames", 2),
+        max_recording_frames=defaults.get("max_recording_frames", 180),
+        max_duration_seconds=defaults.get("max_duration_seconds", 3.0),
+    )
+    templates = []
+    matcher = None
+    if dynamic.get("enabled", True):
+        templates = restore_dynamic_templates(dynamic.get("templates") or [])
+        if templates:
+            matcher = DynamicGestureMatcher().create_runtime_matcher(templates)
+    return PlannedShortcuts(lifecycle=lifecycle, templates=templates, matcher=matcher)

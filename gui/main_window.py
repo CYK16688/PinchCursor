@@ -4,6 +4,7 @@ import os
 import platform
 import time
 import traceback
+from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from math import isfinite
@@ -39,6 +40,7 @@ from core.control_engine import ControlEngine, HandObservation
 from core.control_runtime import ControlRuntime
 from core.control_session import ActivationMode, ControlSession, SessionState
 from core.detector_factory import create_detector
+from core.dynamic_config import plan_dynamic_shortcuts, restore_static_templates
 from core.dynamic_intent_lifecycle import DynamicIntentLifecycle
 from core.gesture_classifier import GestureClassifier
 from core.hand_dynamics import HandDynamics
@@ -691,7 +693,6 @@ class MainWindow(QMainWindow):
 
     _record_candidates = ControlEngine._record_candidates
 
-    _restore_static_templates = ControlEngine._restore_static_templates
 
     def _refresh_control_session_from_config(self, session_cfg=None):
         """Rebuild the live control gate from the currently saved session settings."""
@@ -701,7 +702,7 @@ class MainWindow(QMainWindow):
             monitor.stop()
             monitor.configure(session_cfg.get("hold_shortcut", ""))
         self.static_gesture_matcher = StaticGestureMatcher()
-        self.custom_static_templates = self._restore_static_templates(
+        self.custom_static_templates = restore_static_templates(
             session_cfg.get("custom_static_templates") or []
         )
         self.control_session = ControlSession(
@@ -719,9 +720,16 @@ class MainWindow(QMainWindow):
             matcher=self.static_gesture_matcher,
         )
 
-    _restore_dynamic_templates = ControlEngine._restore_dynamic_templates
-
-    _refresh_dynamic_shortcuts_from_config = ControlEngine._refresh_dynamic_shortcuts_from_config
+    def _refresh_dynamic_shortcuts_from_config(self):
+        """Restore saved motion shortcuts into this window's own runtime state."""
+        self._clear_dynamic_shortcut_observation()
+        plan = plan_dynamic_shortcuts(self.config.get("dynamic_gestures") or {})
+        self.dynamic_intent_lifecycle = plan.lifecycle
+        self.dynamic_landmark_frames = deque(
+            maxlen=self.dynamic_intent_lifecycle.max_recording_frames
+        )
+        self.dynamic_templates = plan.templates
+        self.dynamic_runtime_matcher = plan.matcher
 
     def _dispatch_completed_dynamic_shortcut(self, completed_frames, anchor, *, now):
         """Match and dispatch one lifecycle-completed optional semantic motion."""

@@ -66,3 +66,25 @@ def test_dynamic_records_missing_a_field_are_dropped():
 
 def test_dynamic_non_list_input_reads_as_empty():
     assert restore_dynamic_templates(None) == []
+
+
+def test_plan_dynamic_shortcuts_reads_defaults_and_templates():
+    from core.dynamic_config import plan_dynamic_shortcuts
+
+    empty = plan_dynamic_shortcuts({})
+    assert empty.lifecycle.max_recording_frames == 180
+    assert empty.templates == []
+    assert empty.matcher is None
+
+    _record = _dynamic()
+    planned = plan_dynamic_shortcuts({"enabled": True, "templates": [_record]})
+    assert len(planned.templates) == 1
+    assert planned.matcher is not None
+
+
+def test_plan_dynamic_shortcuts_respects_enabled_false():
+    from core.dynamic_config import plan_dynamic_shortcuts
+
+    planned = plan_dynamic_shortcuts({"enabled": False, "templates": [_dynamic()]})
+    assert planned.templates == []
+    assert planned.matcher is None
