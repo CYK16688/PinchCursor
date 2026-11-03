@@ -175,6 +175,7 @@ class ControlEngine:
     def _configure_pointer(self):
         self.preset = preset_for((self.config.get("performance") or {}).get("mode"))
         sensitivity = read_settings(self.config).sensitivity
+        self.scroll_speed = sensitivity.scroll_speed
         self.smoother = CursorSmoother(
             mincutoff=mincutoff_for_smoothing(sensitivity.smoothing,
                                            default=self.preset.smoothing_mincutoff),
@@ -1067,7 +1068,7 @@ class ControlEngine:
                 probe(int(probe_pos[0]), int(probe_pos[1]), radius)
             except Exception:
                 pass
-        speed = (self.config.get("global_sensitivity") or {}).get("scroll_speed", 50)
+        speed = self.scroll_speed
         hotkey = self._get_gesture(gesture).get("hotkey", "")
         pointer_events = {"point", "pinch", "pinch_hold", "release", "cancel"}
         pointer_gesture = gesture
