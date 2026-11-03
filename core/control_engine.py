@@ -191,10 +191,10 @@ class ControlEngine:
         except (KeyError, TypeError, ValueError):
             self.classifier.pinch_threshold = self._get_gesture("pinch").get("threshold", 35)
         self.classifier.hold_threshold = self._get_gesture("pinch_hold").get("hold_time", 0.3)
-        stabilization = self.config.get("stabilization") or {}
-        for key, default in (("confirm_threshold", 3), ("min_switch_interval", 0.15),
-                             ("exit_threshold", 4), ("cooldown_time", 0.2)):
-            setattr(self.classifier, key, stabilization.get(key, default))
+        stabilization = read_settings(self.config).stabilization
+        for key in ("confirm_threshold", "min_switch_interval",
+                    "exit_threshold", "cooldown_time"):
+            setattr(self.classifier, key, getattr(stabilization, key))
         self.hand_dynamics = HandDynamics(enter_ratio=self.classifier.pinch_enter_ratio,
                                           exit_ratio=self.classifier.pinch_exit_ratio)
         action = self.config.get("action_mode") or {}
