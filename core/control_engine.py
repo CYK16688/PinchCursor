@@ -664,24 +664,25 @@ class ControlEngine:
         the deterministic pointer lane keeps full authority over every frame.
         """
         assist = self.config.get("pointer_assist") or {}
+        typed = read_settings(self.config).assist
         distance, confidence = effective_assist(assist)
         try:
             model = TargetModel(
                 max_snap_distance=distance,
                 min_confidence=confidence,
-                search_radius=float(assist.get("search_radius", 120.0)),
+                search_radius=typed.search_radius,
             )
         except (TypeError, ValueError):
             model = TargetModel()
-        if assist.get("enabled", True) is not True:
+        if not typed.enabled:
             self.target_model = None
             self.ranker = None
             self.assist_mode = "bayesian"
             self.action_machine.snap_provider = None
             return
         self.target_model = model
-        self.assist_mode = assist.get("mode", "bayesian")
-        model_path = assist.get("model_path") or os.path.join(
+        self.assist_mode = typed.mode
+        model_path = typed.model_path or os.path.join(
             os.path.dirname(os.path.abspath(self.config.get("_config_path", "settings.json"))), "target_ranker.json"
         )
         self.ranker = (
