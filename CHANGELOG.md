@@ -38,15 +38,17 @@ useful during review.
   no Qt import at all, and `utils/` no longer imports `core/`.
 - `utils/dynamic_gesture_template.py` moved out of `core/`, which removed the
   reverse `utils -> core` dependency that made the old layering claim false.
-- Every section the typed snapshot models now reads through `utils/settings.py`:
-  pointer mapping, assist, sensitivity, stabilization, scroll, stability,
-  context-aware and temporal.
-  That removes the duplicated default literals (the mapping gain, the scroll
-  timings, the dead zone) and makes an unusable value fall back to the
-  documented default. The transition model now takes its configured path from
-  the typed view. Sections still read directly are the ones a fixed record does
-  not fit:
-  per-gesture lookup tables, list settings and the config file path itself.
+- `utils/settings.py` is the single read path for every settings section that a
+  fixed record can describe: pointer mapping, assist, sensitivity,
+  stabilization, scroll, stability, context-aware, temporal, action-mode,
+  performance and the learned pinch calibration. That removes the duplicated
+  defaults (the mapping gain, the scroll timings, the dead zone, the action
+  thresholds) and makes an unusable value fall back to the documented default;
+  a saved pinch calibration is returned only when both ratios are usable, so
+  "not calibrated" is one explicit rule instead of an exception path. What still
+  reads its own mapping is what a fixed record cannot hold: the per-gesture
+  lookup table, list settings, the config file path, and the learn-time override
+  that a raw assist mapping carries.
 - The conversion of recorded static and dynamic shortcuts into runtime templates
   lives in `core/dynamic_config.py`. The control engine and the main window both
   call it, so the window no longer borrows the engine's private restore methods;
@@ -70,7 +72,7 @@ useful during review.
 - A corrupted batch of words in the README (`mailbox`, `context`, `text`,
   `index`, `experimental`, `explicitly` and `requirements.txt` had letters
   replaced) is repaired.
-- The recorded test count matches the suite again (1478 passing).
+- The recorded test count matches the suite again (1481 passing).
 
 ## 0.2.0 — 2026-10-29
 
