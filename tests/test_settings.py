@@ -50,3 +50,21 @@ def test_an_unusable_gate_flag_cannot_switch_the_gate_off():
         assert snapshot.stability.enabled is True
     assert read({"pointer_stability": {}}).stability.enabled is True
     assert read({"pointer_stability": {"enabled": False}}).stability.enabled is False
+
+def test_context_aware_and_temporal_read_back():
+    snapshot = read({
+        "context_aware": {"enabled": False, "intent_actions_enabled": False},
+        "temporal": {"transition_guard": False, "transition_model": "/tmp/模型.json".replace("模型", "model")},
+    })
+    assert snapshot.context_aware.enabled is False
+    assert snapshot.context_aware.intent_actions_enabled is False
+    assert snapshot.temporal.transition_guard is False
+    assert snapshot.temporal.transition_model.endswith("model.json")
+
+
+def test_context_and_temporal_defaults():
+    snapshot = read({})
+    assert snapshot.context_aware.enabled is True
+    assert snapshot.context_aware.intent_actions_enabled is True
+    assert snapshot.temporal.transition_guard is True
+    assert snapshot.temporal.transition_model == ""

@@ -115,6 +115,22 @@ class PointerStability:
 
 
 @dataclass(frozen=True)
+class ContextAware:
+    """Whether the accessibility context may raise optional intent actions."""
+
+    enabled: bool
+    intent_actions_enabled: bool
+
+
+@dataclass(frozen=True)
+class Temporal:
+    """The learned transition boundary and its guard."""
+
+    transition_guard: bool
+    transition_model: str
+
+
+@dataclass(frozen=True)
 class SettingsSnapshot:
     """One validated read of the settings, safe to hold across frames."""
 
@@ -124,6 +140,8 @@ class SettingsSnapshot:
     stabilization: Stabilization
     scroll: PointerScroll
     stability: PointerStability
+    context_aware: ContextAware
+    temporal: Temporal
 
 
 def read(config, defaults=None):
@@ -188,6 +206,22 @@ def read(config, defaults=None):
         enabled=flag(values, "enabled", True),
     )
 
+    values = section(config, "context_aware")
+    bases = section(base, "context_aware")
+    context_aware = ContextAware(
+        enabled=flag(values, "enabled", flag(bases, "enabled", True)),
+        intent_actions_enabled=flag(
+            values, "intent_actions_enabled", flag(bases, "intent_actions_enabled", True)
+        ),
+    )
+
+    values = section(config, "temporal")
+    bases = section(base, "temporal")
+    temporal = Temporal(
+        transition_guard=flag(values, "transition_guard", flag(bases, "transition_guard", True)),
+        transition_model=text(values, "transition_model", ""),
+    )
+
     return SettingsSnapshot(
         mapping=mapping,
         assist=assist,
@@ -195,6 +229,8 @@ def read(config, defaults=None):
         stabilization=stabilization,
         scroll=scroll,
         stability=stability,
+        context_aware=context_aware,
+        temporal=temporal,
     )
 
 def effective_assist(assist):

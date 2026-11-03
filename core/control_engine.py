@@ -174,7 +174,8 @@ class ControlEngine:
 
     def _configure_pointer(self):
         self.preset = preset_for((self.config.get("performance") or {}).get("mode"))
-        sensitivity = read_settings(self.config).sensitivity
+        settings_view = read_settings(self.config)
+        sensitivity = settings_view.sensitivity
         self.scroll_speed = sensitivity.scroll_speed
         self.smoother = CursorSmoother(
             mincutoff=mincutoff_for_smoothing(sensitivity.smoothing,
@@ -697,8 +698,7 @@ class ControlEngine:
         to acting on it is a separate, reversible step, and it needs held-out
         evidence that the model beats the rule first.
         """
-        temporal = self.config.get("temporal") or {}
-        path = temporal.get("transition_model") or os.path.join(
+        path = read_settings(self.config).temporal.transition_model or os.path.join(
             os.path.dirname(os.path.abspath(self.config.get("_config_path", "settings.json"))),
             "transition_model.json",
         )
