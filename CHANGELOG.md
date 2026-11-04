@@ -29,6 +29,11 @@ useful during review.
 - `.pre-commit-config.yaml` so the same lint runs before a commit lands.
 - `ruff` and type-check configuration under `pyproject.toml`, documented in
   `docs/DEVELOPMENT.md`.
+- `tests/test_layering_contract.py` pins the three invariants the layering
+  refactor achieved, by parsing the sources instead of trusting them: `core/`
+  imports no Qt, `utils/` imports no `core`, and the window declares no
+  `= ControlEngine._x` alias. Each check was confirmed to fail when its rule is
+  broken, so a regression is a red build rather than a quiet one.
 
 ### Changed
 
@@ -74,7 +79,7 @@ useful during review.
 - A corrupted batch of words in the README (`mailbox`, `context`, `text`,
   `index`, `experimental`, `explicitly` and `requirements.txt` had letters
   replaced) is repaired.
-- The recorded test count matches the suite again (1470 passing).
+- The recorded test count matches the suite again (1473 passing).
 
 ### Removed
 

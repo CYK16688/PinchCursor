@@ -12,7 +12,7 @@ env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
 Latest automated result (2026-11-04, exit code checked):
 
 ```text
-1470 passed in 128.62s
+1473 passed in 126.10s
 compileall passed
 exit code 0
 ```
@@ -91,6 +91,13 @@ The lint gate runs `ruff check .` over the whole tree, so a finding in a file a
 change did not touch still fails the branch. The pre-commit configuration and
 isolated pinned-Ruff hook were run locally, including a temporary repository
 containing a file with formatting-only differences.
+
+The layering contract is a test rather than a convention:
+`tests/test_layering_contract.py` parses `core/`, `utils/` and
+`gui/main_window.py` and fails if `core/` imports Qt, if `utils/` imports
+`core/`, or if the window declares an engine attribute alias. Each of the three
+checks was confirmed to fail against a deliberately broken tree, so the
+dependency direction cannot regress quietly.
 
 Manual acceptance remains required for actual camera lighting/distance, left and
 right hands, small controls, Finder/text selection, drag-and-drop, scrolling,
