@@ -49,6 +49,10 @@ useful during review.
   reads its own mapping is what a fixed record cannot hold: the per-gesture
   lookup table, list settings, the config file path, and the learn-time override
   that a raw assist mapping carries.
+- The context, intent-action and transition-guard defaults are defined once
+  beside the schema, so the schema, the typed reader and the engine's
+  hot-path reads fall back to the same value instead of three literals
+  that could drift apart.
 - The conversion of recorded static and dynamic shortcuts into runtime templates
   lives in `core/dynamic_config.py`. The control engine and the main window both
   call it, so the window no longer borrows the engine's private restore methods;
@@ -72,7 +76,7 @@ useful during review.
 - A corrupted batch of words in the README (`mailbox`, `context`, `text`,
   `index`, `experimental`, `explicitly` and `requirements.txt` had letters
   replaced) is repaired.
-- The recorded test count matches the suite again (1481 passing).
+- The recorded test count matches the suite again (1482 passing).
 
 ## 0.2.0 — 2026-10-29
 
