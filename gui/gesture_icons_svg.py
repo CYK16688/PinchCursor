@@ -3,8 +3,8 @@ https://github.com/phosphor-icons/core
 """
 
 from PySide6.QtCore import QByteArray, QRectF
-from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtGui import QPainter
+from PySide6.QtSvg import QSvgRenderer
 
 
 class GestureIconsSVG:

@@ -6,7 +6,7 @@ from PySide6.QtWidgets import QApplication
 
 from gui.combo_card import ComboCard
 from gui.settings_dialog import SettingsDialog
-from utils.config_manager import ConfigManager, DEFAULT_CONFIG, normalize_gesture_combos
+from utils.config_manager import DEFAULT_CONFIG, ConfigManager, normalize_gesture_combos
 
 
 def _dynamic_record():

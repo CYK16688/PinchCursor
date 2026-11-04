@@ -1,15 +1,15 @@
 """Shared pytest configuration for the PinchCursor test suite."""
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import pytest
+import pytest  # noqa: E402 - after sys.path setup
 
-from gui.i18n import DEFAULT_LOCALE, set_locale
+from gui.i18n import DEFAULT_LOCALE, set_locale  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -49,6 +49,14 @@ def isolate_user_data_dir(tmp_path, monkeypatch):
 # pytest_sessionfinish fires before the terminal summary is written, so the exit
 # is deferred to pytest_unconfigure, which runs after reporting completes.
 _EXIT_STATUS = None
+
+
+@pytest.fixture(scope="module")
+def app():
+    """One QApplication per module that asks for it (Qt needs exactly one)."""
+    from PySide6.QtWidgets import QApplication  # lazy: keeps collection Qt-free
+
+    return QApplication.instance() or QApplication([])
 
 
 def pytest_sessionfinish(session, exitstatus):

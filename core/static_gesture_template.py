@@ -65,7 +65,10 @@ class StaticGestureMatcher:
         current = self.normalize(landmarks)
         if current is None or len(current) != len(template.feature_vector):
             return None
-        squared = sum((value - expected) ** 2 for value, expected in zip(current, template.feature_vector))
+        squared = sum(
+            (value - expected) ** 2
+            for value, expected in zip(current, template.feature_vector, strict=False)
+        )
         return sqrt(squared / len(current))
 
     def match(self, landmarks, template: StaticGestureTemplate) -> bool:
@@ -88,4 +91,4 @@ class StaticGestureMatcher:
 
     @staticmethod
     def _distance(first, second) -> float:
-        return sqrt(sum((a - b) ** 2 for a, b in zip(first, second)))
+        return sqrt(sum((a - b) ** 2 for a, b in zip(first, second, strict=False)))

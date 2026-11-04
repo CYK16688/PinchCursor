@@ -8,16 +8,15 @@ pointer control remains available.
 
 from __future__ import annotations
 
-from collections import deque
-from dataclasses import dataclass
-from itertools import islice
 import math
 import threading
 import time
+from collections import deque
+from dataclasses import dataclass
+from itertools import islice
 
 from platform_services.contracts import UIContext
 from platform_services.policy import ContextPolicy
-
 
 _UNAVAILABLE = UIContext(category="generic", source="async_unavailable", is_enabled=False)
 

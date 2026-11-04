@@ -81,7 +81,7 @@ def build_features(
         rank_of[index] = position / max(len(targets) - 1, 1)
 
     rows: list[list[float]] = []
-    for target, distance in zip(targets, distances):
+    for target, distance in zip(targets, distances, strict=False):
         x, y, width, height = target.bounds
         centre_x = x + width / 2.0
         centre_y = y + height / 2.0

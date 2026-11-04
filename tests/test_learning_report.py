@@ -10,7 +10,6 @@ from PySide6.QtWidgets import QApplication
 
 from core.learning_report import (
     TRANSITION_MIN_EPISODES,
-    TRANSITION_MIN_PER_CLASS,
     build_status,
     format_status,
 )

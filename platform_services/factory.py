@@ -113,8 +113,8 @@ def _create_windows_services(
 
 def _create_macos_services(context_policy: ContextPolicy | None = None) -> PlatformServices:
     try:
-        from .macos.input_controller import MacOSInputController
         from .macos.camera import MacOSCameraService
+        from .macos.input_controller import MacOSInputController
         from .macos.native import MacOSNativeFacade
         from .macos.permissions import MacOSPermissionProvider
         from .macos.shortcut_monitor import MacOSHoldShortcutMonitor

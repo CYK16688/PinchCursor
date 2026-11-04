@@ -140,7 +140,8 @@ class SegmentedControl(QWidget):
         button.setCheckable(True)
         button.setCursor(Qt.PointingHandCursor)
         button.setProperty("data", data)
-        button.clicked.connect(lambda _checked=False, index=len(self._buttons): self.setCurrentIndex(index))
+        index = len(self._buttons)
+        button.clicked.connect(lambda _checked=False: self.setCurrentIndex(index))
         self._buttons.append(button)
         self._layout.addWidget(button)
         if len(self._buttons) == 1:

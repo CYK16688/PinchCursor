@@ -1,6 +1,6 @@
+from core.control_session import SessionState
 from gui.i18n import tr
 from gui.main_window import control_button_model
-from core.control_session import SessionState
 from platform_services.contracts import AuthorizationState, PermissionSnapshot
 
 

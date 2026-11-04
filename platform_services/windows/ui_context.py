@@ -3,7 +3,6 @@ from __future__ import annotations
 from platform_services.contracts import UIContext
 from platform_services.policy import ContextPolicy
 
-
 ROLE_CATEGORIES = {
     "Edit": "text_input",
     "ComboBox": "text_input",

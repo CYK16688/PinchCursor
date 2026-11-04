@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 from .contracts import UIContext
 
-
 DEFAULT_GESTURES = {
     "text_input": frozenset({"point", "pinch"}),
     "clickable": frozenset({"point", "pinch", "peace"}),
@@ -35,7 +34,7 @@ class ContextPolicy:
     enabled: bool = True
 
     @classmethod
-    def default(cls) -> "ContextPolicy":
+    def default(cls) -> ContextPolicy:
         return cls(
             allowed_gestures={
                 category: frozenset(gestures)
@@ -48,7 +47,7 @@ class ContextPolicy:
         )
 
     @classmethod
-    def from_config(cls, config: object) -> "ContextPolicy":
+    def from_config(cls, config: object) -> ContextPolicy:
         """Build a fail-closed contextual policy from persisted settings."""
         policy = cls.default()
         if not isinstance(config, dict):

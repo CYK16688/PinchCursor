@@ -1,6 +1,5 @@
 from core.action_state_machine import ActionState, ActionStateMachine
 
-
 APPROACHING = {"distance": 50, "velocity": -250, "is_approaching": True}
 NOT_APPROACHING = {"distance": 100, "velocity": 0, "is_approaching": False}
 

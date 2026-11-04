@@ -1,5 +1,5 @@
-from platform_services.contracts import ActionRequest, ActionResult, AuthorizationState
 from core.input_guard import InputGuard
+from platform_services.contracts import ActionRequest, ActionResult, AuthorizationState
 
 
 class GestureActionCoordinator:

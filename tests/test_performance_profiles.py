@@ -1,7 +1,5 @@
 """The two resource profiles, and that switching one changes real numbers."""
 
-import pathlib
-import tempfile
 
 import pytest
 from PySide6.QtWidgets import QApplication

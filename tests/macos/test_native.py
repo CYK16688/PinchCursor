@@ -1,7 +1,8 @@
+import pytest
+
 from platform_services.macos.native import MacOSNativeFacade
 from platform_services.macos.ui_context import MacOSUIContextProvider
 from platform_services.policy import ContextPolicy
-import pytest
 
 
 @pytest.mark.parametrize(

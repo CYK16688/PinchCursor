@@ -4,8 +4,8 @@ import pathlib
 import tempfile
 
 import pytest
-from PySide6.QtGui import QCursor
 from PySide6.QtCore import QPoint
+from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QApplication
 
 from core.pointer_mapping import AbsoluteMapper, RelativeMapper, ScreenBounds

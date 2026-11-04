@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import math
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 # MediaPipe 手部关键点索引（模块级辅助函数也需要）
 WRIST_INDEX = 0
@@ -120,7 +120,7 @@ class PinchCalibrator:
     ) -> None:
         """收集一帧或多帧观测；非法样本被静默忽略。"""
         try:
-            pairs = list(zip(pinches, palm_scales))
+            pairs = list(zip(pinches, palm_scales, strict=False))
         except TypeError:
             return
         for pinch, palm_scale in pairs:
@@ -281,16 +281,6 @@ class GestureClassifier:
         self.none_count = 0  # 连续none计数(用于快速退出)
 
     # ------------------------------------------------------------------
-    @property
-    def pinch_enter_ratio(self) -> float:
-        """Current entering threshold as pinch-distance / palm-scale."""
-        return self._pinch_enter_ratio
-
-    @property
-    def pinch_exit_ratio(self) -> float:
-        """Current exit threshold as pinch-distance / palm-scale."""
-        return self._pinch_exit_ratio
-
     # 捏合阈值：对外保留 pinch_threshold / pinch_exit_threshold 像素属性，
     # 内部判定统一使用比值；像素属性同时作为 palm_scale 不可用时的回退。
     # ------------------------------------------------------------------
@@ -495,11 +485,8 @@ class GestureClassifier:
         """获取5个手指的伸直状态 - 基于距离比例"""
         states = []
 
-        # 计算手掌参考点 (手腕和中指MCP的中点)
         wrist = landmarks[self.WRIST]
         middle_mcp = landmarks[self.MIDDLE_MCP]
-        palm_cx = (wrist[0] + middle_mcp[0]) / 2
-        palm_cy = (wrist[1] + middle_mcp[1]) / 2
 
         # 拇指: 比较TIP到食指MCP的距离
         thumb_tip = landmarks[self.THUMB_TIP]
@@ -538,7 +525,6 @@ class GestureClassifier:
         """获取拇指方向: 'up', 'down', 'side' 或 'none'"""
         thumb_tip = landmarks[self.THUMB_TIP]
         thumb_mcp = landmarks[self.THUMB_MCP]
-        wrist = landmarks[self.WRIST]
 
         # 计算拇指向量
         dx = thumb_tip[0] - thumb_mcp[0]

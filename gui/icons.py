@@ -18,6 +18,7 @@ from functools import lru_cache
 from PySide6.QtCore import QByteArray, QRectF, Qt
 from PySide6.QtGui import QGuiApplication, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
+
 from core.resource_paths import resource_root
 
 

@@ -1,27 +1,25 @@
-"""Render the README screenshots from the real widgets (offscreen)."""
-
 """Regenerate docs/screenshots/*.png from the real widgets (offscreen).
 
 Run from anywhere: the script resolves the repository root itself. It uses fake
 platform services, so no camera or accessibility permission is required.
 """
 
+import pathlib
 import sys
 import tempfile
-import pathlib
 
 BASE = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE))
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication  # noqa: E402 - after sys.path setup
 
 app = QApplication([])
 app.setStyle("Fusion")
 
-from gui import icons                       # noqa: E402
-from utils.config_manager import ConfigManager  # noqa: E402
+from gui import icons  # noqa: E402
+from gui.i18n import set_locale  # noqa: E402
 from gui.theme import DARK_THEME, apply_dark_palette  # noqa: E402
-from gui.i18n import set_locale                          # noqa: E402
+from utils.config_manager import ConfigManager  # noqa: E402
 
 apply_dark_palette(app)
 app.setStyleSheet(DARK_THEME)
@@ -32,9 +30,8 @@ OUT.mkdir(parents=True, exist_ok=True)
 
 
 # ---- main window fixtures -------------------------------------------------
-from gui import main_window as mw           # noqa: E402
-from platform_services.contracts import (   # noqa: E402
-    ActionResult,
+from gui import main_window as mw  # noqa: E402
+from platform_services.contracts import (  # noqa: E402
     AuthorizationState,
     CameraDevice,
     PermissionSnapshot,
@@ -42,9 +39,7 @@ from platform_services.contracts import (   # noqa: E402
     PlatformServices,
     UIContext,
 )
-from platform_services.null import (        # noqa: E402
-    GenericUIContextProvider,
-    UnavailableCameraService,
+from platform_services.null import (  # noqa: E402
     UnavailableInputController,
 )
 
@@ -113,12 +108,14 @@ def shot_main(name, camera, accessibility, *, locale="zh_CN", size=(1200, 720), 
     if phase is not None:
         # A clearly labelled synthetic state illustrates the real feedback
         # widgets without starting a camera or posting native input.
+        import time
+
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QColor, QPainter, QPixmap
+
         from core.action_state_machine import ActionState
         from core.control_engine import ControlSnapshot
         from core.control_session import SessionState
-        from PySide6.QtGui import QColor, QPainter, QPixmap
-        from PySide6.QtCore import Qt
-        import time
 
         window.is_running = True
         window._refresh_precision_console()
@@ -152,9 +149,10 @@ shot_main("main-pinch-confirmed.png", AuthorizationState.GRANTED, AuthorizationS
 
 
 # ---- settings pages -------------------------------------------------------
-from gui.settings_dialog import SettingsDialog              # noqa: E402
-from core.telemetry import TelemetryStore, default_path      # noqa: E402
-import time                                                  # noqa: E402
+import time  # noqa: E402
+
+from core.telemetry import TelemetryStore, default_path  # noqa: E402
+from gui.settings_dialog import SettingsDialog  # noqa: E402
 
 tmp = pathlib.Path(tempfile.mkdtemp())
 config = ConfigManager(config_path=tmp / "settings.json")
@@ -203,7 +201,7 @@ dialog.close()
 
 
 # ---- calibration dialog ---------------------------------------------------
-from PySide6.QtCore import QObject, Signal                  # noqa: E402
+from PySide6.QtCore import QObject, Signal  # noqa: E402
 
 
 class FakeWorker(QObject):

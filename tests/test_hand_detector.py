@@ -1,6 +1,7 @@
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
-from types import SimpleNamespace
 
 from core.hand_detector import HandDetector
 from core.pointer_mapping import AbsoluteMapper, ScreenBounds

@@ -177,7 +177,7 @@ def test_invalid_durations_are_rejected(value):
 
 
 def test_default_config_enables_core_scroll_independently_of_context(tmp_path):
-    from utils.config_manager import ConfigManager, DEFAULT_CONFIG
+    from utils.config_manager import DEFAULT_CONFIG, ConfigManager
 
     assert DEFAULT_CONFIG["pointer_scroll"] == {
         "enabled": True, "dwell_seconds": 0.3, "repeat_seconds": 0.12, "enter_seconds": 0.08,

@@ -1,7 +1,9 @@
 """手势控制电脑 - 主入口"""
 
 import sys
+
 from PySide6.QtWidgets import QApplication
+
 from gui import icons
 from gui.main_window import MainWindow
 from gui.native_chrome import apply_dark_titlebar

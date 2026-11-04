@@ -21,7 +21,7 @@ class InteractionPanel(QFrame):
         self.steps = []
         steps = QHBoxLayout()
         steps.setSpacing(6)
-        for index in range(3):
+        for _ in range(3):
             label = QLabel()
             label.setObjectName("interactionStep")
             self.steps.append(label)

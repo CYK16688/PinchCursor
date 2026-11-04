@@ -1,6 +1,6 @@
 """Pointer-adjacent, non-intercepting desktop gesture feedback HUD."""
 
-from PySide6.QtCore import Qt, QRect
+from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QLabel, QWidget
 
@@ -144,10 +144,18 @@ class GestureOverlay(QWidget):
         """Render the fixed-grid outline vocabulary for core HUD hand states."""
         if icon_name == "point":
             path = QPainterPath()
-            path.moveTo(16, 38); path.lineTo(16, 19); path.quadTo(16, 14, 20, 14)
-            path.quadTo(24, 14, 24, 19); path.lineTo(24, 29); path.lineTo(29, 24)
-            path.quadTo(33, 21, 36, 25); path.lineTo(39, 29); path.quadTo(42, 32, 39, 35)
-            path.lineTo(31, 43); path.quadTo(27, 47, 21, 44); path.closeSubpath()
+            path.moveTo(16, 38)
+            path.lineTo(16, 19)
+            path.quadTo(16, 14, 20, 14)
+            path.quadTo(24, 14, 24, 19)
+            path.lineTo(24, 29)
+            path.lineTo(29, 24)
+            path.quadTo(33, 21, 36, 25)
+            path.lineTo(39, 29)
+            path.quadTo(42, 32, 39, 35)
+            path.lineTo(31, 43)
+            path.quadTo(27, 47, 21, 44)
+            path.closeSubpath()
             painter.drawPath(path)
         elif icon_name in {"pinch", "grab"}:
             painter.drawEllipse(13, 16, 15, 15)
@@ -157,11 +165,15 @@ class GestureOverlay(QWidget):
                 painter.drawLine(17, 38, 37, 38)
                 painter.drawLine(20, 42, 34, 42)
         elif icon_name == "peace":
-            painter.drawLine(20, 40, 20, 17); painter.drawLine(20, 17, 15, 12)
-            painter.drawLine(28, 40, 28, 17); painter.drawLine(28, 17, 33, 12)
+            painter.drawLine(20, 40, 20, 17)
+            painter.drawLine(20, 17, 15, 12)
+            painter.drawLine(28, 40, 28, 17)
+            painter.drawLine(28, 17, 33, 12)
             painter.drawArc(16, 31, 16, 14, 180 * 16, -180 * 16)
         elif icon_name == "thumb_volume":
-            painter.drawLine(13, 27, 19, 27); painter.drawLine(19, 27, 25, 20)
-            painter.drawLine(19, 27, 25, 34); painter.drawArc(23, 18, 15, 18, -45 * 16, 90 * 16)
+            painter.drawLine(13, 27, 19, 27)
+            painter.drawLine(19, 27, 25, 20)
+            painter.drawLine(19, 27, 25, 34)
+            painter.drawArc(23, 18, 15, 18, -45 * 16, 90 * 16)
         else:
             painter.drawEllipse(15, 18, 18, 18)

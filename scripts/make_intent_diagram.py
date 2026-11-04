@@ -21,7 +21,16 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 # One palette, shared with the overview figure so the two cannot drift apart.
 from make_architecture_diagram import (  # noqa: E402
-    ACCENT, INK, MONO, MUTED, PAPER, SANS, SERIF, SOFT, SURFACE, ZONE_MASK,
+    ACCENT,
+    INK,
+    MONO,
+    MUTED,
+    PAPER,
+    SANS,
+    SERIF,
+    SOFT,
+    SURFACE,
+    ZONE_MASK,
 )
 
 LINK = "#2E5AA8"
@@ -112,7 +121,9 @@ def build_svg() -> str:
     arrows.append(f'    <path d="M320,{RES_Y + SPINE_H} V{DISPATCH_Y}" fill="none" stroke="{ACCENT}" stroke-width="1.2" marker-end="url(#arrow-accent)"/>')
 
     nodes = "\n".join(spine_node(*stage) for stage in SPINE)
-    chips = "\n".join(chip(x, *spec) for x, spec in zip(CHIP_XS, CHIPS))
+    chips = "\n".join(
+        chip(x, *spec) for x, spec in zip(CHIP_XS, CHIPS, strict=False)
+    )
 
     def resolution(y: int, tag: str, name: str, sub: str, tuned: bool) -> str:
         x, w, h = SPINE_X, SPINE_W, SPINE_H

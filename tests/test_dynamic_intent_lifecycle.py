@@ -1,6 +1,5 @@
 from core.dynamic_intent_lifecycle import DynamicIntentLifecycle, DynamicIntentState
 
-
 FRAME = [(0.0, 0.0, 0.0)] * 21
 
 

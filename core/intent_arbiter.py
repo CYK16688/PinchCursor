@@ -7,7 +7,6 @@ from enum import StrEnum
 
 from core.action_state_machine import ActionState
 
-
 CORE_POINTER_GESTURES = frozenset({"point", "pinch", "pinch_hold"})
 
 

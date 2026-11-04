@@ -3,7 +3,6 @@
 These are synthetic control replays, not camera or user accuracy measurements.
 """
 
-import math
 import random
 
 import pytest

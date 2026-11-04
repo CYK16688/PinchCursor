@@ -1,10 +1,10 @@
 """Shipped marks must load in source/frozen apps and native icon containers."""
 
-from pathlib import Path
 import shutil
 import struct
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from PySide6.QtCore import Qt

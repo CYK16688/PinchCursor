@@ -61,7 +61,7 @@ def build_features(assessment) -> tuple[float, ...] | None:
         numbers.append(number)
     return tuple(
         round(min(max(number, low), high), 4)
-        for number, (low, high) in zip(numbers, _BOUNDS)
+        for number, (low, high) in zip(numbers, _BOUNDS, strict=False)
     )
 
 

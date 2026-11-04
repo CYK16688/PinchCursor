@@ -1,6 +1,6 @@
-from dataclasses import FrozenInstanceError
 import threading
 import time
+from dataclasses import FrozenInstanceError
 
 import pytest
 

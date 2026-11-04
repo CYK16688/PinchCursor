@@ -4,8 +4,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QDialog
 
-from gui.i18n import set_locale, tr
 from gui.gesture_list import GestureList
+from gui.i18n import set_locale, tr
 from gui.settings_dialog import SettingsDialog
 from utils.config_manager import ConfigManager
 
@@ -207,7 +207,7 @@ def test_the_click_versus_drag_window_is_adjustable():
     from copy import deepcopy
 
     from gui.gesture_list import GestureList
-    from utils.config_manager import DEFAULT_CONFIG, ConfigManager
+    from utils.config_manager import DEFAULT_CONFIG
 
     gestures = deepcopy(DEFAULT_CONFIG["gestures"])
     gestures["pinch_hold"]["hold_time"] = 0.3

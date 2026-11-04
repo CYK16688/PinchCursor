@@ -6,7 +6,6 @@ import math
 from platform_services.contracts import UIContext
 from platform_services.policy import ContextPolicy
 
-
 # Categories that can be an aiming target. Containers are excluded on
 # purpose: snapping to a scroll area would move the cursor for no reason.
 # Sliders are aimable: a thin track is the control point assist helps most

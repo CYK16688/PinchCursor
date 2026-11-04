@@ -1,7 +1,7 @@
 """Primary pointer tuning stays reachable; advanced edits keep staged semantics."""
 
-from copy import deepcopy
 import os
+from copy import deepcopy
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 

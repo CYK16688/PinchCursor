@@ -5,13 +5,13 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
 
-from gui import main_window
-from gui.i18n import tr
 from core.control_session import SessionState
 from core.static_gesture_template import StaticGestureMatcher
+from gui import main_window
+from gui.i18n import tr
 from platform_services.contracts import ActionResult, PlatformCapabilities, PlatformServices
 from platform_services.null import (
     GenericUIContextProvider,

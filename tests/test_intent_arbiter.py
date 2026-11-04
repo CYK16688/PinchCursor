@@ -1,7 +1,6 @@
 from core.action_state_machine import ActionState
 from core.intent_arbiter import IntentArbiter, IntentOwner
 
-
 NOT_APPROACHING = {"distance": 100, "velocity": 0, "is_approaching": False}
 APPROACHING = {"distance": 50, "velocity": -250, "is_approaching": True}
 

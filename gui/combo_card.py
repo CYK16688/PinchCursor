@@ -1,17 +1,13 @@
 """组合动作卡片组件 - 配置手势组合触发的动作"""
 
-from PySide6.QtWidgets import (
-    QFrame, QVBoxLayout, QHBoxLayout, QLabel,
-    QComboBox, QPushButton, QLineEdit
-)
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPainter, QColor, QLinearGradient, QPen
+from PySide6.QtWidgets import QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from core.intent_arbiter import CORE_POINTER_GESTURES
-from utils.config_manager import COMBO_ACTIONS
-from utils.hotkey_validation import normalize_hotkey
 from gui.hotkey_input import HotkeyInput
 from gui.i18n import tr
+from utils.config_manager import COMBO_ACTIONS
+from utils.hotkey_validation import normalize_hotkey
 
 
 class ComboCard(QFrame):

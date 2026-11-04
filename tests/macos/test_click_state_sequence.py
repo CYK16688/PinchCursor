@@ -9,8 +9,6 @@ to carry state 2, exactly as a physical mouse does.
 
 import os
 
-import pytest
-
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from platform_services.contracts import ActionRequest

@@ -54,7 +54,7 @@ def export_ico(image: QImage, destination: Path) -> None:
     frames = [png_bytes(image, size) for size in ICO_SIZES]
     offset = 6 + 16 * len(frames)
     directory = bytearray(struct.pack("<HHH", 0, 1, len(frames)))
-    for size, frame in zip(ICO_SIZES, frames):
+    for size, frame in zip(ICO_SIZES, frames, strict=False):
         dimension = 0 if size == 256 else size
         directory.extend(struct.pack("<BBBBHHII", dimension, dimension, 0, 0, 1, 32, len(frame), offset))
         offset += len(frame)

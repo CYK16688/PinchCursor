@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 
 from core.telemetry import TelemetryStore
-from core.transition_features import FEATURE_COUNT
 from core.transition_model import TransitionModel
 from scripts.train_transition import main as train_main
 
@@ -72,7 +71,7 @@ def test_the_episode_table_has_no_content_column(tmp_path):
 def _seed(path, count=400, *, noise=0.15, seed=7):
     rng = np.random.default_rng(seed)
     store = TelemetryStore(str(path), enabled=True)
-    for index in range(count):
+    for _ in range(count):
         # The label is driven by the first feature; the rule's verdict is
         # independent of it, which is the situation the model exists to fix.
         ratio = rng.normal(0.5, 0.3)

@@ -5,10 +5,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
-from gui.hud_state import HudState
 from gui.i18n import DEFAULT_LOCALE, set_locale
 from gui.overlay import GestureOverlay
-from platform_services.macos.hud_panel import MacOSHudPanelController
 
 
 def setup_function():
@@ -44,7 +42,9 @@ def test_overlay_delegates_raise_to_native_panel_when_enabled():
         def panel_for_widget(self, _widget): return self.panel
 
     app = QApplication.instance() or QApplication([])
-    native = Native(); native.panel = Panel(); native.panel.raised = False
+    native = Native()
+    native.panel = Panel()
+    native.panel.raised = False
     overlay = GestureOverlay()
     try:
         overlay.enable_macos_global_panel(native)

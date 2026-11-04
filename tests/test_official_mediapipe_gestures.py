@@ -2,7 +2,6 @@ from core.gesture_classifier import GestureClassifier
 from gui.settings_dialog import SettingsDialog
 from utils.config_manager import DEFAULT_CONFIG
 
-
 OFFICIAL_MEDIAPIPE_CANNED_GESTURES = {
     "Closed_Fist": "fist",
     "Open_Palm": "open_hand",

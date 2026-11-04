@@ -47,7 +47,7 @@ class LinearRanker:
         if len(row) != len(self.weights):
             raise ValueError("feature row has the wrong width")
         total = self.intercept
-        for weight, value in zip(self.weights, row):
+        for weight, value in zip(self.weights, row, strict=False):
             total += weight * value
         return total
 
@@ -116,7 +116,7 @@ class LinearRanker:
         }
 
     @classmethod
-    def from_dict(cls, payload: object) -> "LinearRanker":
+    def from_dict(cls, payload: object) -> LinearRanker:
         if not isinstance(payload, dict):
             raise ValueError("model payload must be an object")
         names = tuple(payload.get("feature_names") or FEATURE_NAMES)
@@ -136,10 +136,10 @@ class LinearRanker:
         )
 
     @classmethod
-    def load(cls, path: str) -> "LinearRanker | None":
+    def load(cls, path: str) -> LinearRanker | None:
         """Load a model file, returning None for anything unusable."""
         try:
-            with open(path, "r", encoding="utf-8") as handle:
+            with open(path, encoding="utf-8") as handle:
                 payload = json.load(handle)
             return cls.from_dict(payload)
         except (OSError, ValueError, TypeError, json.JSONDecodeError):

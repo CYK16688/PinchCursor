@@ -1,13 +1,20 @@
 """Compact action-first reference, built from the actual gesture bindings."""
 
-from PySide6.QtCore import Qt, QSize, Signal
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QPainter, QPixmap
+from PySide6.QtWidgets import (
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from gui import icons
 from gui.gesture_icons_svg import GestureIconsSVG
 from gui.i18n import tr
-from PySide6.QtGui import QPainter, QPixmap
-from PySide6.QtCore import QRectF
 
 
 class GestureGuide(QFrame):

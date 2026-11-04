@@ -43,10 +43,10 @@ class TransitionModel:
         self.metadata = dict(metadata or {})
 
     @classmethod
-    def load(cls, path: str) -> "TransitionModel | None":
+    def load(cls, path: str) -> TransitionModel | None:
         """Return a model, or None when the file is missing or does not fit."""
         try:
-            with open(path, "r", encoding="utf-8") as handle:
+            with open(path, encoding="utf-8") as handle:
                 payload = json.load(handle)
         except (OSError, ValueError):
             return None
@@ -83,7 +83,7 @@ class TransitionModel:
         if vector is None:
             return None
         total = self.intercept
-        for value, weight, mean, scale in zip(vector, self.weights, self.mean, self.scale):
+        for value, weight, mean, scale in zip(vector, self.weights, self.mean, self.scale, strict=False):
             total += weight * ((value - mean) / scale)
         if not math.isfinite(total):
             return None

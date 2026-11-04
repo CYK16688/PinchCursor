@@ -32,7 +32,7 @@ def apply_dark_titlebar(window) -> bool:
         if handle == 0:
             return False
 
-        from AppKit import NSApplication, NSAppearance, NSAppearanceNameDarkAqua
+        from AppKit import NSAppearance, NSAppearanceNameDarkAqua, NSApplication
 
         # Never manufacture an Objective-C object from a raw pointer: a proxy
         # that guesses ownership wrong can release a window AppKit and Qt both

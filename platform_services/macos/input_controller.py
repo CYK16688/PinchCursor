@@ -5,7 +5,6 @@ from inspect import signature
 
 from platform_services.contracts import ActionRequest, ActionResult, normalize_cursor_position
 
-
 SUPPORTED_ACTIONS = frozenset(
     {
         "move_cursor",

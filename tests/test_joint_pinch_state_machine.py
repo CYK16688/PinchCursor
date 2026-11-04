@@ -6,7 +6,6 @@ import pytest
 
 from core.action_state_machine import ActionState, ActionStateMachine, PinchActionEvidence
 
-
 TARGET = (100, 100)
 ANCHOR = (10, 10)
 CLOSED = {'is_pinching': True, 'is_approaching': True, 'distance': 5, 'velocity': -100}

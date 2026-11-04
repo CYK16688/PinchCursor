@@ -1,12 +1,14 @@
 """Confirmation-based static trigger recording dialog."""
 
 from enum import StrEnum
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout
+
+from core.static_gesture_template import StaticGestureMatcher
 from gui.i18n import tr
 from gui.theme import use_styled_background
-from core.static_gesture_template import StaticGestureMatcher
 
 
 class RecordingState(StrEnum):
@@ -41,8 +43,15 @@ class StaticGestureRecordDialog(QDialog):
         self.confirm_button = QPushButton()
         self.retry_button.clicked.connect(self.retry)
         self.confirm_button.clicked.connect(self.accept)
-        row = QHBoxLayout(); row.addWidget(self.retry_button); row.addStretch(); row.addWidget(self.confirm_button)
-        layout.addWidget(self.title_label); layout.addWidget(self.status); layout.addWidget(self.preview); layout.addWidget(self.name_input); layout.addLayout(row)
+        row = QHBoxLayout()
+        row.addWidget(self.retry_button)
+        row.addStretch()
+        row.addWidget(self.confirm_button)
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.status)
+        layout.addWidget(self.preview)
+        layout.addWidget(self.name_input)
+        layout.addLayout(row)
         self.retranslate_ui()
 
     @property

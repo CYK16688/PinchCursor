@@ -2,10 +2,10 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtWidgets import QApplication
 
 from gui import main_window
-from gui.i18n import DEFAULT_LOCALE, current_locale, set_locale, tr
+from gui.i18n import DEFAULT_LOCALE, set_locale
 from platform_services.contracts import (
     AuthorizationState,
     PermissionSnapshot,

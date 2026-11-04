@@ -150,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"locks: {locks}   candidate rows: {len(labels)}")
     print(f"validation top-1: model={accuracy}  bayesian-baseline={baseline}")
     print("weights:")
-    for name, weight in zip(FEATURE_NAMES, weights):
+    for name, weight in zip(FEATURE_NAMES, weights, strict=False):
         print(f"  {name:14s} {weight:+.4f}")
 
     if args.dry_run:

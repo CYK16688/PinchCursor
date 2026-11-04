@@ -15,13 +15,12 @@ read-only path must never interrupt pointer control.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
-import os
 import json
+import os
 import sqlite3
 import threading
 import time
+from collections.abc import Sequence
 
 # The vector width lives with the features so the table cannot disagree.
 from .transition_features import FEATURE_COUNT as _FEATURE_COUNT
@@ -452,7 +451,7 @@ class TelemetryStore:
                 (max(1, min(int(limit), 500)),),
             )
             names = ("ts", "kind") + _FIELDS
-            return [dict(zip(names, row)) for row in cursor.fetchall()]
+            return [dict(zip(names, row, strict=False)) for row in cursor.fetchall()]
         except (sqlite3.Error, TypeError, ValueError):
             return []
 

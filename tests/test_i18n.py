@@ -1,4 +1,4 @@
-from gui.i18n import _CATALOGS, DEFAULT_LOCALE, current_locale, normalize_locale, set_locale, tr
+from gui.i18n import DEFAULT_LOCALE, current_locale, normalize_locale, set_locale, tr
 
 
 def setup_function():

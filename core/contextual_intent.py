@@ -20,7 +20,6 @@ from dataclasses import dataclass
 
 from platform_services.contracts import UIContext
 
-
 # Notches per second when a thumb gesture is held: one every 120 ms is about
 # what a trackpad's momentum-less scroll feels like, and slow enough that the
 # user can stop on a line.

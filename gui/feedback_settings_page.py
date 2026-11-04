@@ -1,6 +1,14 @@
 """Feedback preferences for the pointer-adjacent HUD."""
 
-from PySide6.QtWidgets import QComboBox, QFormLayout, QGroupBox, QLabel, QSpinBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFormLayout,
+    QGroupBox,
+    QLabel,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 from gui.i18n import tr
 
@@ -31,9 +39,13 @@ class FeedbackSettingsPage(QWidget):
         ):
             self.mode_combo.addItem(tr(key), mode)
         self.mode_combo.setCurrentIndex(max(self.mode_combo.findData(feedback.get("mode", "standard")), 0))
-        self.opacity_input = QSpinBox(); self.opacity_input.setRange(40, 100); self.opacity_input.setSuffix(" %")
+        self.opacity_input = QSpinBox()
+        self.opacity_input.setRange(40, 100)
+        self.opacity_input.setSuffix(" %")
         self.opacity_input.setValue(round(feedback.get("opacity", 0.92) * 100))
-        self.scale_input = QSpinBox(); self.scale_input.setRange(80, 160); self.scale_input.setSuffix(" %")
+        self.scale_input = QSpinBox()
+        self.scale_input.setRange(80, 160)
+        self.scale_input.setSuffix(" %")
         self.scale_input.setValue(round(feedback.get("scale", 1.0) * 100))
         self.feedback_level_label = QLabel()
         self.opacity_label = QLabel()

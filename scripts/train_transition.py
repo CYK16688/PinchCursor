@@ -29,10 +29,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.learning_report import (  # noqa: E402
     TRANSITION_MIN_EPISODES as MIN_EPISODES,
+)
+from core.learning_report import (
     TRANSITION_MIN_PER_CLASS as MIN_PER_CLASS,
 )
 from core.telemetry import TelemetryStore  # noqa: E402
 from core.transition_features import FEATURE_COUNT, FEATURE_NAMES  # noqa: E402
+
 EPOCHS = 500
 LEARNING_RATE = 0.2
 L2 = 0.01
@@ -147,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"validation accuracy: model={model_accuracy}  rule={rule_accuracy}")
     print("weights (standardised inputs):")
-    for name, weight in zip(FEATURE_NAMES, weights):
+    for name, weight in zip(FEATURE_NAMES, weights, strict=False):
         print(f"  {name:18s} {weight:+.4f}")
 
     if model_accuracy is not None and rule_accuracy is not None and model_accuracy <= rule_accuracy:

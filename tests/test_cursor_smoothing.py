@@ -59,8 +59,9 @@ def test_beta_is_no_longer_derived_from_the_dial():
 
 def test_the_measured_jitter_actually_improves_across_the_dial():
     """End-to-end: a still hand must jitter less at the smoothing end."""
-    from core.pointer_mapping import AbsoluteMapper, ScreenBounds
     import random
+
+    from core.pointer_mapping import AbsoluteMapper, ScreenBounds
 
     bounds = ScreenBounds(0, 0, 2560, 1440)
     mapper = AbsoluteMapper()

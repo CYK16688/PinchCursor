@@ -3,7 +3,6 @@ from __future__ import annotations
 from platform_services.contracts import ActionRequest, ActionResult, normalize_cursor_position
 from utils.windows_hotkey_validation import normalize_windows_hotkey
 
-
 SUPPORTED_ACTIONS = frozenset(
     {
         "move_cursor",

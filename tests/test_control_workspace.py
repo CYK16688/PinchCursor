@@ -12,7 +12,7 @@ from core.action_state_machine import ActionState
 from gui import main_window
 from gui.i18n import tr
 from platform_services.contracts import AuthorizationState
-from tests.test_gesture_reference_panel import _window, app
+from tests.test_gesture_reference_panel import _window
 from tests.test_interaction_feedback import outcome, snapshot
 from utils.config_manager import ConfigManager
 
@@ -145,7 +145,9 @@ def test_settings_entries_have_names_and_open_the_expected_sections(workspace, m
 
 def test_candidate_preview_keeps_pointer_hud_until_confirmed_target(workspace, monkeypatch):
     from types import SimpleNamespace
+
     import numpy as np
+
     from gui.hud_state import HudState
 
     window = workspace

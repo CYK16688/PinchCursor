@@ -6,7 +6,6 @@ for every single notch. Scrolling is the most frequent desktop interaction, whic
 made that the single biggest reason the app could not replace a mouse.
 """
 
-import pytest
 
 from core.contextual_intent import ContextualIntentController
 from platform_services.contracts import UIContext

@@ -5,7 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication
 
 from gui.camera_settings_page import CameraSettingsPage
-from gui.i18n import DEFAULT_LOCALE, set_locale
+from gui.i18n import set_locale
 from platform_services.contracts import CameraDevice
 from utils.config_manager import ConfigManager
 

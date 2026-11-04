@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from math import isfinite
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING
 
 from core.action_state_machine import ActionState
 from core.control_session import SessionState
