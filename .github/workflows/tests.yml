@@ -24,21 +24,16 @@ jobs:
         run: python -m compileall -q core capture gui platform_services utils main.py
       - name: Run tests
         run: python -m pytest -q
-  # Real gate, scoped while the tree is still dirty: only the Python files this
-  # push or pull request touches have to be clean. Every other file keeps its
-  # existing findings, so switching the gate on cannot redden the branch on day
-  # one.
+  # Whole-tree gate. The tree is clean, so the check does not need to know which
+  # files a push touched: any finding anywhere fails the branch.
   lint:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
       - name: Install lint tools
         run: python -m pip install ruff==0.17.3
-      - name: Lint changed Python files
-        run: python scripts/lint_changed.py
+      - name: Lint the whole tree
+        run: python -m ruff check .

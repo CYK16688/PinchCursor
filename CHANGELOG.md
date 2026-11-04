@@ -25,8 +25,7 @@ useful during review.
   `tests/test_power_policy.py`, `tests/test_ir_presence.py`,
   `tests/test_settings.py`.
 - A real CI gate in `.github/workflows/tests.yml`: a blocking job that compiles
-  and runs the whole suite, and a separate lint job that runs `ruff` on the
-  Python files a push or pull request actually touches.
+  and runs the whole suite, and a lint job running `ruff` over the whole tree.
 - `.pre-commit-config.yaml` so the same lint runs before a commit lands.
 - `ruff` and type-check configuration under `pyproject.toml`, documented in
   `docs/DEVELOPMENT.md`.
@@ -62,6 +61,9 @@ useful during review.
   the window explicitly, bound to the real engine class captured at import.
 - Documentation: `docs/DEVELOPMENT.md` gained a static-checks section, and
   `docs/CONTROL_ARCHITECTURE.md` records the new module boundaries.
+- The whole tree is now clean under `ruff check .`: 141 findings cleared, all
+  style-level, so the lint gate covers the whole checkout instead of only the
+  files a change happens to touch.
 
 ### Fixed
 
@@ -69,14 +71,16 @@ useful during review.
   pointer-position rejection: an outlier on release cannot erase a click or
   postpone cancelling an active drag. Rejected positions cannot start another
   action or become a click target.
-- CI lint checks the whole push or pull-request range, handles deleted and
-  renamed files, and passes file paths without shell splitting. The local hook
-  uses the same pinned Ruff version; formatting remains optional until the
-  existing formatting debt is resolved.
 - A corrupted batch of words in the README (`mailbox`, `context`, `text`,
   `index`, `experimental`, `explicitly` and `requirements.txt` had letters
   replaced) is repaired.
-- The recorded test count matches the suite again (1482 passing).
+- The recorded test count matches the suite again (1470 passing).
+
+### Removed
+
+- `scripts/lint_changed.py` and its 12 tests. The changed-file linter existed
+  only to keep pre-existing ruff debt out of the gate; with the tree clean,
+  `ruff check .` covers everything and its range bookkeeping has no job left.
 
 ## 0.2.0 — 2026-10-29
 

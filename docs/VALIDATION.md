@@ -5,14 +5,14 @@
 Run with the project environment (Python 3.13 + PySide6 6.12):
 
 ```bash
-env -u PYTHONPATH .venv/bin/python -m compileall -q core capture gui platform_services utils scripts/lint_changed.py main.py tests
+env -u PYTHONPATH .venv/bin/python -m compileall -q core capture gui platform_services utils main.py tests
 env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
 ```
 
-Latest automated result (2026-11-03, exit code checked):
+Latest automated result (2026-11-04, exit code checked):
 
 ```text
-1482 passed in 127.68s
+1470 passed in 128.62s
 compileall passed
 exit code 0
 ```
@@ -87,12 +87,10 @@ MediaPipe inference on an empty image; it does not measure gesture accuracy.
 | Auxiliary freshness and bounds | `test_async_services.py` checks bounded request/write queues, request-start cache age, spatial validity, invalidation generations, policy-disabled behavior, and deferred store disposal. |
 | Native cursor reanchor | Fake Quartz and Win32 cursor readers retain fractional/negative coordinates and reject malformed positions; relative mapping does not read QCursor from the control thread. |
 
-`test_lint_changed.py` uses temporary Git histories to verify complete push/PR
-lint ranges, new branches, first pushes, force-push recovery, deleted/renamed
-paths and filenames containing spaces or shell metacharacters. The pre-commit
-configuration and isolated pinned-Ruff hook were also run locally, including a
-temporary repository containing a file with formatting-only differences. This
-does not establish a successful remote GitHub Actions run.
+The lint gate runs `ruff check .` over the whole tree, so a finding in a file a
+change did not touch still fails the branch. The pre-commit configuration and
+isolated pinned-Ruff hook were run locally, including a temporary repository
+containing a file with formatting-only differences.
 
 Manual acceptance remains required for actual camera lighting/distance, left and
 right hands, small controls, Finder/text selection, drag-and-drop, scrolling,

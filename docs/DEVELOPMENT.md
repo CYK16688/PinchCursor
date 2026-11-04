@@ -126,15 +126,11 @@ tracked; `build/`, `dist/` and Python caches are disposable local output.
 The test suite is the blocking gate. These checks cover what tests cannot see,
 and the CI workflow runs them as a separate job.
 
-The lint job installs `ruff==0.17.3` and checks Python files across the entire
-push (`before..after`) or pull request (the base/head common ancestor through
-the PR head). Deleted paths are excluded and renamed paths use their new names.
-When a new branch has no previous SHA, it uses the default branch's common
-ancestor; the first repository push checks every tracked Python file. Existing
-findings in untouched files are outside this gate.
-If a force push leaves the previous commit outside fetched history, the script
-fetches that exact SHA. An unavailable baseline fails the check instead of
-silently checking a smaller range.
+The lint job installs `ruff==0.17.3` and runs `ruff check .` over the whole
+tree. The gate is whole-tree rather than diff-scoped, so a finding anywhere
+fails the branch - including one introduced in a file the change did not touch.
+That is only possible because the tree is clean; a scoped gate existed while
+141 findings were still outstanding, and it retired with them.
 
 Install the local hook from the project root:
 
@@ -145,9 +141,9 @@ uv pip install --python .venv/bin/python 'pre-commit==4.7.0'
 
 The hook creates its own Python environment with the same pinned Ruff version,
 so it does not depend on a globally installed `ruff`. It checks staged Python
-files; CI checks the complete event range. Neither gate requires formatting:
-the tree has existing formatting differences, which are handled separately from
-behaviour changes. To review formatting or whole-tree lint voluntarily:
+files; CI checks the whole tree. Neither gate requires formatting: the tree has
+existing formatting differences, which are handled separately from behaviour
+changes. To review formatting voluntarily:
 
 ```bash
 uv pip install --python .venv/bin/python 'ruff==0.17.3'
