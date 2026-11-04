@@ -20,7 +20,12 @@ shape the rest of the runtime uses.
 import math
 from dataclasses import dataclass
 
-from utils.config_manager import DEFAULT_CONFIG
+from utils.config_manager import (
+    DEFAULT_CONFIG,
+    DEFAULT_CONTEXT_ENABLED,
+    DEFAULT_INTENT_ACTIONS_ENABLED,
+    DEFAULT_TRANSITION_GUARD,
+)
 
 
 def section(config, name):
@@ -235,16 +240,20 @@ def read(config, defaults=None):
     values = section(config, "context_aware")
     bases = section(base, "context_aware")
     context_aware = ContextAware(
-        enabled=flag(values, "enabled", flag(bases, "enabled", True)),
+        enabled=flag(values, "enabled", flag(bases, "enabled", DEFAULT_CONTEXT_ENABLED)),
         intent_actions_enabled=flag(
-            values, "intent_actions_enabled", flag(bases, "intent_actions_enabled", True)
+            values,
+            "intent_actions_enabled",
+            flag(bases, "intent_actions_enabled", DEFAULT_INTENT_ACTIONS_ENABLED),
         ),
     )
 
     values = section(config, "temporal")
     bases = section(base, "temporal")
     temporal = Temporal(
-        transition_guard=flag(values, "transition_guard", flag(bases, "transition_guard", True)),
+        transition_guard=flag(
+            values, "transition_guard", flag(bases, "transition_guard", DEFAULT_TRANSITION_GUARD)
+        ),
         transition_model=text(values, "transition_model", ""),
     )
 

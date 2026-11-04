@@ -196,6 +196,15 @@ def normalize_dynamic_gestures(value):
     }
 
 
+# Defaults for the two context/temporal switches that more than one layer reads.
+# They live here, beside the schema, so the schema, the typed reader and the
+# control engine all fall back to the same value instead of each carrying a
+# literal that can drift.
+DEFAULT_CONTEXT_ENABLED = True
+DEFAULT_INTENT_ACTIONS_ENABLED = True
+DEFAULT_TRANSITION_GUARD = True
+
+
 DEFAULT_CONFIG = {
     "schema_version": CURRENT_SCHEMA_VERSION,
     "ui": {
@@ -247,7 +256,7 @@ DEFAULT_CONFIG = {
         "enabled": False
     },
     "temporal": {
-        "transition_guard": True,
+        "transition_guard": DEFAULT_TRANSITION_GUARD,
         # Empty means "transition_model.json beside the config", which is where
         # scripts/train_transition.py writes by default.
         "transition_model": ""
@@ -336,8 +345,8 @@ DEFAULT_CONFIG = {
         "cooldown_time": 0.2
     },
     "context_aware": {
-        "enabled": True,  # 默认启用智能上下文感知
-        "intent_actions_enabled": True,
+        "enabled": DEFAULT_CONTEXT_ENABLED,  # 默认启用智能上下文感知
+        "intent_actions_enabled": DEFAULT_INTENT_ACTIONS_ENABLED,
         # 组件类型 → 允许的手势列表（用户可自定义）
         "control_gestures": {
             "text_input": ["point", "pinch"],

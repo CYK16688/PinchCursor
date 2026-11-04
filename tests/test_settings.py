@@ -99,3 +99,25 @@ def test_pinch_calibration_reads_only_a_usable_window():
     assert read_pinch_calibration({"pinch_calibration": {"enter_ratio": 0.4, "exit_ratio": 0.0}}) is None
     usable = read_pinch_calibration({"pinch_calibration": {"enter_ratio": 0.4, "exit_ratio": 0.55}})
     assert usable is not None and usable.exit_ratio == 0.55
+
+
+def test_context_and_temporal_defaults_have_one_source():
+    """The schema, the typed reader and the constants must agree."""
+    from utils.config_manager import (
+        DEFAULT_CONFIG,
+        DEFAULT_CONTEXT_ENABLED,
+        DEFAULT_INTENT_ACTIONS_ENABLED,
+        DEFAULT_TRANSITION_GUARD,
+    )
+
+    assert DEFAULT_CONFIG["context_aware"]["enabled"] is DEFAULT_CONTEXT_ENABLED
+    assert (
+        DEFAULT_CONFIG["context_aware"]["intent_actions_enabled"]
+        is DEFAULT_INTENT_ACTIONS_ENABLED
+    )
+    assert DEFAULT_CONFIG["temporal"]["transition_guard"] is DEFAULT_TRANSITION_GUARD
+
+    snapshot = read({})
+    assert snapshot.context_aware.enabled is DEFAULT_CONTEXT_ENABLED
+    assert snapshot.context_aware.intent_actions_enabled is DEFAULT_INTENT_ACTIONS_ENABLED
+    assert snapshot.temporal.transition_guard is DEFAULT_TRANSITION_GUARD

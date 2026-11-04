@@ -41,6 +41,11 @@ from core.static_gesture_template import StaticGestureMatcher
 from core.transition_episodes import PinchEpisodeTracker
 from core.transition_model import TransitionModel
 from platform_services.contracts import ActionRequest, ActionResult
+from utils.config_manager import (
+    DEFAULT_CONTEXT_ENABLED,
+    DEFAULT_INTENT_ACTIONS_ENABLED,
+    DEFAULT_TRANSITION_GUARD,
+)
 from utils.settings import effective_assist, read_pinch_calibration
 from utils.settings import read as read_settings
 from utils.smoothing import (
@@ -376,7 +381,8 @@ class ControlEngine:
                 anchor = self._last_cursor_pos
             if (anchor is not None
                     and (decision.allow_combo or decision.allow_dynamic)
-                    and (self.config.get("context_aware") or {}).get("enabled", True)):
+                    and (self.config.get("context_aware") or {}).get(
+                        "enabled", DEFAULT_CONTEXT_ENABLED)):
                 # A one-shot combo or completed take must not be the first
                 # asynchronous policy request. Warm the bounded context port
                 # while observing its optional lane; unavailable results still
@@ -479,7 +485,8 @@ class ControlEngine:
         """
         if assessment is None or gesture not in ("pinch", "pinch_hold"):
             return gesture
-        if (self.config.get("temporal") or {}).get("transition_guard", True) is not True:
+        if (self.config.get("temporal") or {}).get(
+                "transition_guard", DEFAULT_TRANSITION_GUARD) is not True:
             return gesture
         if self.action_machine.state is not ActionState.MOVING:
             return gesture
@@ -1131,8 +1138,9 @@ class ControlEngine:
         if (position_accepted
                 and (allow_contextual or (gesture == "point" and self.action_machine.state is ActionState.MOVING))
                 and not self.pointer_scroll_enabled
-                and target_detected and context_cfg.get("enabled", True)
-                and context_cfg.get("intent_actions_enabled", True)):
+                and target_detected and context_cfg.get("enabled", DEFAULT_CONTEXT_ENABLED)
+                and context_cfg.get(
+                    "intent_actions_enabled", DEFAULT_INTENT_ACTIONS_ENABLED)):
             try:
                 context = self._cached_context(x, y)
                 intent = self.contextual_intent_controller.observe(context, gesture=gesture, now=now)
