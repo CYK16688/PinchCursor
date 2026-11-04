@@ -173,16 +173,16 @@ PinchCursor is a macOS-specific implementation focused on continuous pinch inten
 
 | Project | Relationship |
 |---|---|
-| [MediaPipe](https://github.com/google-ai-edge/mediapipe) · ~37.4k stars | Hand landmark inference used by the runtime |
+| [MediaPipe](https://github.com/google-ai-edge/mediapipe) · ~37.5k stars | Hand landmark inference used by the runtime |
 | [OpenCV](https://github.com/opencv/opencv) · ~91.4k stars | Camera and image-processing foundation |
-| [PyObjC](https://github.com/ronaldoussoren/pyobjc) · ~827 stars | macOS accessibility and native event bridge |
+| [PyObjC](https://github.com/ronaldoussoren/pyobjc) · ~829 stars | macOS accessibility and native event bridge |
 | [Barehands](https://github.com/jaredrhod/barehands) · ~1.1k stars | Adjacent webcam hand-controlled interface |
-| [Gesture-Controlled-Virtual-Mouse](https://github.com/Viral-Doshi/Gesture-Controlled-Virtual-Mouse) · ~878 stars | Popular Python/MediaPipe virtual-mouse baseline |
-| [hand-gesture-recognition-using-mediapipe](https://github.com/Kazuhito00/hand-gesture-recognition-using-mediapipe) · ~770 stars | Hand-landmark gesture-classification reference |
+| [Gesture-Controlled-Virtual-Mouse](https://github.com/Viral-Doshi/Gesture-Controlled-Virtual-Mouse) · ~880 stars | Popular Python/MediaPipe virtual-mouse baseline |
+| [hand-gesture-recognition-using-mediapipe](https://github.com/Kazuhito00/hand-gesture-recognition-using-mediapipe) · ~771 stars | Hand-landmark gesture-classification reference |
 | [awesome-hands-control](https://github.com/RylanBot/awesome-hands-control) · ~350 stars | Curated index of hand-controlled software |
 | [NonMouse](https://github.com/takeyamayuki/NonMouse) · ~202 stars | Desk-oriented webcam gesture mouse |
 
-Star counts are approximate and were checked on 2026-10-29.
+Star counts are approximate and were checked against the GitHub API on 2026-11-04.
 
 ## Status
 

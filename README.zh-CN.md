@@ -175,16 +175,16 @@ PinchCursor 是面向 macOS 的实现，重点是连续捏合意图、闭合前�
 
 | 项目 | 关联 |
 |---|---|
-| [MediaPipe](https://github.com/google-ai-edge/mediapipe) · 约 3.74 万 Star | 运行时使用的手部关键点推理框架 |
+| [MediaPipe](https://github.com/google-ai-edge/mediapipe) · 约 3.75 万 Star | 运行时使用的手部关键点推理框架 |
 | [OpenCV](https://github.com/opencv/opencv) · 约 9.14 万 Star | 摄像头采集和图像处理基础 |
-| [PyObjC](https://github.com/ronaldoussoren/pyobjc) · 约 827 Star | macOS 无障碍与原生事件桥接 |
+| [PyObjC](https://github.com/ronaldoussoren/pyobjc) · 约 829 Star | macOS 无障碍与原生事件桥接 |
 | [Barehands](https://github.com/jaredrhod/barehands) · 约 1.1k Star | 相似的摄像头手部控制界面 |
-| [Gesture-Controlled-Virtual-Mouse](https://github.com/Viral-Doshi/Gesture-Controlled-Virtual-Mouse) · 约 878 Star | 使用 Python/MediaPipe 的虚拟鼠标实践 |
-| [hand-gesture-recognition-using-mediapipe](https://github.com/Kazuhito00/hand-gesture-recognition-using-mediapipe) · 约 770 Star | 基于手部关键点的手势分类参考 |
+| [Gesture-Controlled-Virtual-Mouse](https://github.com/Viral-Doshi/Gesture-Controlled-Virtual-Mouse) · 约 880 Star | 使用 Python/MediaPipe 的虚拟鼠标实践 |
+| [hand-gesture-recognition-using-mediapipe](https://github.com/Kazuhito00/hand-gesture-recognition-using-mediapipe) · 约 771 Star | 基于手部关键点的手势分类参考 |
 | [awesome-hands-control](https://github.com/RylanBot/awesome-hands-control) · 约 350 Star | 手势控制软件资源索引 |
 | [NonMouse](https://github.com/takeyamayuki/NonMouse) · 约 202 Star | 面向桌面使用的摄像头手势鼠标 |
 
-Star 数为约数，核对于 2026-10-29。
+Star 数为约数，于 2026-11-04 通过 GitHub API 核对。
 
 ## 状态
 
