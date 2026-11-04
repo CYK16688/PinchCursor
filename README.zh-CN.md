@@ -50,6 +50,24 @@ flowchart LR
 
 摄像头处理和 MediaPipe 推理独立于 UI 运行。唯一的控制线程负责滤波、意图、指针状态与原生输入；无障碍和遥测使用有界后台队列，即使上下文查询或磁盘写入变慢，也不会阻塞指针移动。
 
+## 项目结构
+
+五个包，一个依赖方向：`capture/` 和 `platform_services/` 向上喂给 `core/`，
+`core/` 使用 `utils/`，`gui/` 在最上层。
+
+| 包 | 负责 |
+|---|---|
+| `capture/` | 摄像头画面与 MediaPipe 推理（与 Qt 线程耦合）|
+| `platform_services/` | 通往 macOS 输入、权限和 UI 上下文的唯一边界 |
+| `core/` | 确定性决策与指针管线；不导入 Qt |
+| `utils/` | 配置、平滑、快捷键校验、手势模板 |
+| `gui/` | PySide6 外壳、设置界面、呈现 |
+
+两条规则支撑整个设计：`core/` 从不导入 Qt（画面以纯数据经邮箱进入，因此决策
+路径可在测试中无头运行）；`utils/` 从不导入 `core/`，依赖箭头只有一个方向。
+配置统一经 `utils/settings.py` 这一条带类型、失败即回退的读取路径，而不是每个
+使用方各自推一份默认值。
+
 ## 连续意图
 
 ```mermaid
@@ -99,9 +117,13 @@ Watchdog 使用 250 ms 证据租约，并在释放失败时持续重试。旧帧
 git clone https://github.com/CYK16688/PinchCursor.git
 cd PinchCursor
 python3.13 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e ".[macos,test,macos-build]"
 .venv/bin/python main.py
 ```
+
+`.[macos,test,macos-build]` 会装上固定版本的 macOS 桥接、测试工具和
+PyInstaller。只想要最小运行时（不含构建与测试依赖）时，改用
+`pip install -r requirements.txt`。喜欢 `uv`？见[开发文档](docs/DEVELOPMENT.md)。
 
 运行状态保存在 `~/Library/Application Support/PinchCursor/`，不会写入应用包。
 
@@ -131,7 +153,7 @@ open "dist/PinchCursor.app"
 
 捏合校准、录制手势和可选目标排序都在本地适配。唯一能够影响指针输入的学习模型是目标排序器，并且默认以影子模式运行，必须由用户明确启用。阈值和回退方式见[运行时契约](docs/CONTROL_ARCHITECTURE.md)。
 
-## 验证
+## 验证与质量门禁
 
 ```bash
 env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
@@ -139,6 +161,13 @@ env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
 ```
 
 合成关键点回放覆盖点击、双击、拖动、释放、滚动、丢手、过期帧、摄像头几何变化、精细控制以及 15/30/60 FPS 链路。原生输入使用假 OS 接收端。真实摄像头准确度、实体鼠标等价性、实际拔插恢复和长时间舒适度仍需设备验收，详见[验证文档](docs/VALIDATION.md)。
+
+除全量测试外，CI 在每次 push 和 pull request 上跑两个 job：一个阻塞式 job
+编译并运行全量测试，另一个 lint job 只检查本次提交真正触碰的 Python 文件。
+lint job 覆盖整段 push 或 PR 范围、跟随重命名、跳过已删除路径，并在基线
+commit 不可达时拒绝退回更小的范围——因此不会「什么都没检查却悄悄通过」。
+同一固定版本的 Ruff 也通过 pre-commit 钩子运行；在该项目既有的格式差异
+清理完之前，格式化只是可选的审查步骤。具体命令见[开发文档](docs/DEVELOPMENT.md)。
 
 ## 生态与相关项目
 
@@ -162,6 +191,11 @@ Star 数为约数，核对于 2026-10-29。
 - macOS 为正式支持平台；Windows 适配器仍为实验性。
 - 无障碍瞄准更适合原生控件，在 Electron 或网页内容中可能不会启用。
 - 学习排序器通常需要数百个带标签的点击后才具备使用价值。
+
+## 贡献与变更历史
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) - 开发环境、分层契约，以及一次改动需要携带的证据。
+- [CHANGELOG.md](CHANGELOG.md) - 每个版本改了什么。
 
 ## 许可证
 

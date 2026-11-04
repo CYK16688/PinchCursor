@@ -50,6 +50,25 @@ flowchart LR
 
 Camera processing and MediaPipe inference run away from the UI. A single control thread owns filtering, intent, pointer state and native dispatch. Accessibility and telemetry are optional background services with bounded queues, so slow context lookup or disk writes cannot block pointer movement.
 
+## Project layout
+
+Five packages, one dependency direction: `capture/` and `platform_services/`
+feed `core/`, `core/` uses `utils/`, and `gui/` sits on top.
+
+| Package | Owns |
+|---|---|
+| `capture/` | Camera frames and MediaPipe inference, Qt-thread coupled |
+| `platform_services/` | The only boundary to macOS input, permissions and UI context |
+| `core/` | Deterministic decisions and the pointer pipeline; no Qt import |
+| `utils/` | Config, smoothing, hotkey validation, gesture templates |
+| `gui/` | PySide6 shell, settings surfaces, presentation |
+
+Two rules carry the design: `core/` never imports Qt (frames reach it as plain
+data through the mailbox, so the decision path runs headless in tests), and
+`utils/` never imports `core/`, so the arrow only points one way. Settings are
+read through `utils/settings.py`, one typed, fail-closed path, rather than each
+consumer re-deriving a default.
+
 ## Continuous intent
 
 ```mermaid
@@ -93,9 +112,14 @@ Requires macOS 15+, Python 3.13 and a camera.
 git clone https://github.com/CYK16688/PinchCursor.git
 cd PinchCursor
 python3.13 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e ".[macos,test,macos-build]"
 .venv/bin/python main.py
 ```
+
+`.[macos,test,macos-build]` pulls the pinned macOS bridges, the test tools and
+PyInstaller. For a bare runtime install without the build and test extras, use
+`pip install -r requirements.txt` instead. Prefer `uv`? See
+[DEVELOPMENT.md](docs/DEVELOPMENT.md) for the `uv` equivalent.
 
 Runtime state lives in `~/Library/Application Support/PinchCursor/`, never inside the app bundle.
 
@@ -125,7 +149,7 @@ Camera frames never leave memory. The optional event log stores gesture outcomes
 
 Pinch calibration, recorded gestures and optional target ranking adapt locally. The only model allowed to affect pointer input is the target ranker, and it starts in shadow mode until explicitly promoted. See [the runtime contract](docs/CONTROL_ARCHITECTURE.md) for thresholds and rollback behavior.
 
-## Validation
+## Validation and quality gates
 
 ```bash
 env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
@@ -133,6 +157,15 @@ env -u PYTHONPATH QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
 ```
 
 Synthetic landmark replays cover click, double-click, drag, release, scroll, tracking loss, stale frames, camera geometry changes, fine control and 15/30/60 FPS paths. Native input uses fake OS sinks. Real-camera accuracy, physical mouse equivalence, actual unplug recovery and long-session comfort still require device acceptance; details are in [VALIDATION.md](docs/VALIDATION.md).
+
+Beyond the suite, CI runs two jobs on every push and pull request: a blocking
+job that compiles and runs the full suite, and a lint job that checks the Python
+files a commit actually touches. The lint job scopes itself to the whole push or
+pull-request range, follows renames, skips deleted paths and refuses to fall back
+to a smaller range if the base commit is unreachable, so it cannot quietly pass
+by checking nothing. The same pinned Ruff version runs from a pre-commit hook;
+formatting is a voluntary review step until the existing differences are
+resolved. See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for the exact commands.
 
 ## Ecosystem and related projects
 
